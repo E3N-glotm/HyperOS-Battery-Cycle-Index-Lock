@@ -1,0 +1,6 @@
+id=battery_cycle_aging_switch_off
+name=HyperOS Battery Cycle Index Lock
+version=1.1.0
+versionCode=110
+author=E3N
+description=Locks Xiaomi BasedOnCC-VolDown cyclecount_index to index 1 for all cycle counts on pudding / OS3.0.319.0.WPCCNXM. Keeps the OEM strategy itself, LowSoh/FreqChg, thermal, over-voltage/current and PMIC/kernel safety protections intact. Systemless; disable/uninstall + reboot restores stock.
