@@ -53,7 +53,7 @@ int main(int argc, char** argv) {
         const std::string output=run(obj.data(),input);
         if (output.empty() || output.size()>1024*1024) return 6;
         if (!strcmp(argv[1],"decrypt") && (output.find('{')==std::string::npos || output.find('}')==std::string::npos)) return 7;
-        if (!strcmp(argv[1],"encrypt") && output.compare(0,8,"BAA_ENC:")) return 8;
+        if (!strcmp(argv[1],"encrypt") && output.size()%4 != 0) return 8; // Vendor encrypt() returns Base64 body; config wrapper adds BAA_ENC:
         if (!write_staging(argv[3],output)) return 9;
         std::cout<<"OK "<<argv[1]<<" staged bytes="<<output.size()<<"\n";
         return 0;
