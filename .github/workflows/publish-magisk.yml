@@ -58,7 +58,7 @@ jobs:
           path: dist/HyperOS-Battery-Cycle-Index-Lock-v*.zip
       - name: Publish new version
         env:
-          GH_TOKEN: \${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           VERSION="$(sed -n 's/^version=//p' module.prop)"
