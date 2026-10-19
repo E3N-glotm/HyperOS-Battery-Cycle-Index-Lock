@@ -1,3 +1,4 @@
+// Build-on-GitHub compatibility probe (Android NDK r27).
 // Experimental local compatibility probe, not a charger-modification daemon.
 // Only reads the given input file and writes an explicitly named staging file.
 #include <dlfcn.h>
