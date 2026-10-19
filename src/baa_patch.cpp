@@ -59,51 +59,71 @@ public:
         return "BAA_ENC:"+body;
     }
 };
-static void low_soh(json& obj) {
+static void patch_low_soh(json& obj) {
     auto& n=obj.at("LowSoh-FvDown").at("sysfs_node");
     auto& cycle=n.at("cyclecount");
     auto& soh=n.at("soh");
-    if (cycle.at("range_min")!=200 || cycle.at("range_max")!=800 || soh.at("threshold")!=85)
-        throw std::runtime_error("Unexpected source LowSoh conditions");
+    const int old_min=cycle.at("range_min").get<int>();
+    const int old_max=cycle.at("range_max").get<int>();
+    const int old_threshold=soh.at("threshold").get<int>();
+    // Capability AND semantics check. Refuse unexplained OEM schema changes.
+    // Never enable aging reduction sooner than the stock cycle/health threshold.
+    if (old_min < 0 || old_min > 801 ||
+        old_max < old_min || old_max < 800 ||
+        old_threshold < 50 || old_threshold > 100)
+        throw std::runtime_error("Unrecognized or stricter OEM LowSoh policy; refusing");
     cycle["range_min"]=801;
     cycle["range_max"]=2147483647;
     soh["threshold"]=50;
 }
-static void maps(json& obj) {
-    const json expected=json::parse(R"([{"idx":1,"min":1,"max":100},{"idx":2,"min":101,"max":300},{"idx":3,"min":301,"max":800},{"idx":4,"min":801,"max":2147483647}])");
-    const json after=json::parse(R"([{"idx":1,"min":1,"max":2147483647}])");
+static void patch_maps(json& obj) {
     auto& vendor=obj.at("BasedOnCC-VolDown").at("vendor_id_3");
     for(const char* battery: {"CN-battery","GL-battery"}) {
         auto& row=vendor.at(battery).at("cyclecount_index_map");
-        if (row!=expected) throw std::runtime_error(std::string("Unexpected source map: ")+battery);
-        row=after;
+        if(!row.is_array() || row.empty() || row.size()>8)
+            throw std::runtime_error(std::string("Unrecognized OEM cycle map: ")+battery);
+        int expected_min=1;
+        int expected_idx=1;
+        for(const auto& entry:row) {
+            const int idx=entry.at("idx").get<int>();
+            const int lo=entry.at("min").get<int>();
+            const int hi=entry.at("max").get<int>();
+            if(entry.size()!=3 || idx!=expected_idx || lo!=expected_min ||
+               hi<lo || hi<=0 || expected_idx>8)
+                throw std::runtime_error(std::string("Invalid cycle map schema: ")+battery);
+            expected_min=hi==2147483647?2147483647:hi+1;
+            ++expected_idx;
+        }
+        if(row.back().at("max").get<int>()!=2147483647)
+            throw std::runtime_error("OEM cycle ranges do not reach INT_MAX");
+        row=json::array({{{"idx",1},{"min",1},{"max",2147483647}}});
     }
 }
 static void patch(const std::string& source, const std::string& output, VendorCrypto& crypto, bool pudding) {
     const std::string plain=crypto.decrypt(read_checked(source));
     const json initial=json::parse(plain);
     json transformed=initial;
-    low_soh(transformed);
-    if (pudding) maps(transformed);
-    // Semantic proof: reversing *only* the intended changes reconstructs all OEM configuration.
-    json reversed=transformed;
-    auto& n=reversed.at("LowSoh-FvDown").at("sysfs_node");
-    n.at("cyclecount")["range_min"]=200;
-    n.at("cyclecount")["range_max"]=800;
-    n.at("soh")["threshold"]=85;
-    if (pudding) {
-        const json original_map=json::parse(R"([{"idx":1,"min":1,"max":100},{"idx":2,"min":101,"max":300},{"idx":3,"min":301,"max":800},{"idx":4,"min":801,"max":2147483647}])");
-        auto& v=reversed.at("BasedOnCC-VolDown").at("vendor_id_3");
-        v.at("CN-battery")["cyclecount_index_map"]=original_map;
-        v.at("GL-battery")["cyclecount_index_map"]=original_map;
+    patch_low_soh(transformed);
+    if(pudding) patch_maps(transformed);
+    // Semantic proof: only these explicitly selected paths may change.
+    json reverted=transformed;
+    reverted.at("LowSoh-FvDown").at("sysfs_node")=
+        initial.at("LowSoh-FvDown").at("sysfs_node");
+    if(pudding) {
+        const auto& src=initial.at("BasedOnCC-VolDown").at("vendor_id_3");
+        auto& dest=reverted.at("BasedOnCC-VolDown").at("vendor_id_3");
+        for(const char* battery:{"CN-battery","GL-battery"})
+            dest.at(battery).at("cyclecount_index_map")=
+                src.at(battery).at("cyclecount_index_map");
     }
-    if(reversed!=initial) throw std::runtime_error("Unexpected fields changed");
+    if(reverted!=initial) throw std::runtime_error("Non-target OEM fields changed");
     const std::string text=transformed.dump();
-    const std::string output_cipher=crypto.encrypt(text);
-    if (json::parse(crypto.decrypt(output_cipher))!=transformed)
-        throw std::runtime_error("BAA_ENC roundtrip validation failed");
-    write_checked(output,output_cipher);
-    std::cout << "PASS " << (pudding?"pudding":"common") << ", patched ciphertext bytes=" << output_cipher.size() << "\n";
+    const std::string ciphertext=crypto.encrypt(text);
+    if(json::parse(crypto.decrypt(ciphertext))!=transformed)
+        throw std::runtime_error("Vendor encryption roundtrip failed");
+    write_checked(output,ciphertext);
+    std::cout << "PASS " << (pudding?"pudding":"common")
+              << ", validated OEM schema, bytes="<<ciphertext.size()<<"\n";
 }
 int main(int argc, char** argv) {
     if(argc!=5) {
