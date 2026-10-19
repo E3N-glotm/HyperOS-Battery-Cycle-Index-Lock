@@ -1,50 +1,68 @@
 #!/system/bin/sh
-# v1.3.0: decrypt and rebuild on the user's exact OEM firmware.
-# Fail closed. Never redistribute vendor encrypted charging configurations.
-ui_print "- HyperOS Battery Cycle + SOH Index Lock v1.3.0 / E3N"
-ui_print "- Xiaomi pudding / HyperOS OS4.0.4.0.XPCCNXM / API 37 only"
-ui_print "- Both OEM BAA_ENC files are generated on this device"
+# Capability-driven HyperOS BAA_ENC installer. Physical battery profile stays
+# pudding-specific; ROM build numbers and OEM ciphertext hashes are NOT gates.
+ui_print "- Battery Cycle + SOH Index Lock v1.4.0 (capability detection)"
 P=/odm/etc/charger/BAA_config_pudding.json
 C=/odm/etc/charger/BAA_config_common.json
-PS=a03abd594154588667684b8c09ceccbd51e5d9875fc827e0eee08d8d4c1ecad5
-CS=83aac16d8bed63170c856b41b1d280e1720a2738131b5de326ae40dbcffdfd44
-# Upgrade fingerprints: original verified v1.3.0 hotfix applied on this exact device.
-P_HOTFIX=21f267901bbc09981e37538749ef94275c23ffeac88e95bd44658fd02f5e8759
-C_HOTFIX=f7f41e1c649ba43ca3eee3378e75356b26de3ab54179d77f8c261688f9e9689c
-digest() { sha256sum "$1" 2>/dev/null | cut -d ' ' -f 1; }
-[ "$(getprop ro.product.device)" = pudding ] || abort "! Not Xiaomi pudding"
-[ "$(getprop ro.build.version.incremental)" = OS4.0.4.0.XPCCNXM ] || abort "! Unsupported ROM"
-[ "$(getprop ro.build.version.sdk)" = 37 ] || abort "! Unsupported Android API"
-[ -r "$P" ] && [ -r "$C" ] || abort "! OEM BAA files unavailable"
-[ "$(head -c 8 "$P")" = BAA_ENC: ] || abort "! Pudding not BAA_ENC"
-[ "$(head -c 8 "$C")" = BAA_ENC: ] || abort "! Common not BAA_ENC"
-mkdir -p "$MODPATH/private" || abort "! Cannot create private staging directory"
+OLD=/data/adb/modules/battery_cycle_aging_switch_off
+OP="$OLD/private/BAA_config_pudding.json"
+OC="$OLD/private/BAA_config_common.json"
+META="$MODPATH/private/verified.sha256"
 PP="$MODPATH/private/BAA_config_pudding.json"
 CP="$MODPATH/private/BAA_config_common.json"
-P_ACTUAL="$(digest "$P")"
-C_ACTUAL="$(digest "$C")"
-if [ "$P_ACTUAL" = "$PS" ] && [ "$C_ACTUAL" = "$CS" ]; then
-  ui_print "- Stock OEM pair verified; building private encrypted configs"
-  [ -x "$MODPATH/bin/baa_patch" ] || chmod 0755 "$MODPATH/bin/baa_patch"
-  "$MODPATH/bin/baa_patch" "$P" "$C" "$PP" "$CP" || abort "! Vendor decryption, JSON verification, or encryption failed"
-elif [ "$P_ACTUAL" = "$P_HOTFIX" ] && [ "$C_ACTUAL" = "$C_HOTFIX" ]; then
-  OLD=/data/adb/modules/battery_cycle_aging_switch_off
-  [ -f "$OLD/module.prop" ] || abort "! Unrecognized pre-existing hotfix"
-  grep -q '^version=1.3.0$' "$OLD/module.prop" || abort "! Hotfix version mismatch"
-  [ "$(digest "$OLD/private/BAA_config_pudding.json")" = "$P_HOTFIX" ] || abort "! Hotfix pudding source mismatch"
-  [ "$(digest "$OLD/private/BAA_config_common.json")" = "$C_HOTFIX" ] || abort "! Hotfix common source mismatch"
-  ui_print "- Verified v1.3.0 on-device hotfix; carrying generated ciphertext forward"
-  cp "$OLD/private/BAA_config_pudding.json" "$PP" || abort "! Failed to copy hotfix pudding config"
-  cp "$OLD/private/BAA_config_common.json" "$CP" || abort "! Failed to copy hotfix common config"
+digest() { sha256sum "$1" 2>/dev/null | cut -d ' ' -f1; }
+valid_sha() { [ "$(expr "$1" : '[a-f0-9]*$')" = 64 ]; }
+[ "$(getprop ro.product.device)" = pudding ] || abort "! Unsupported battery hardware profile"
+[ "$(getprop ro.product.cpu.abi)" = arm64-v8a ] || abort "! Requires ARM64 vendor BAA ABI"
+[ -r /vendor/lib64/libbaa_common.so ] || abort "! Vendor BAA crypto capability not found"
+[ -r "$P" ] && [ -r "$C" ] || abort "! BAA OEM config interfaces missing"
+[ "$(head -c 8 "$P")" = BAA_ENC: ] && [ "$(head -c 8 "$C")" = BAA_ENC: ] ||
+  abort "! BAA_ENC source format not supported"
+[ -x /system/bin/nsenter ] || abort "! PID1 mount namespace capability unavailable"
+[ -r /sys/class/xm_power/fg_master/cyclecount ] &&
+[ -r /sys/class/xm_power/fg_master/soh ] || abort "! BMS cyclecount/SOH interfaces unavailable"
+mkdir -p "$MODPATH/private" || abort "! Private config directory unavailable"
+chmod 0700 "$MODPATH/private"
+[ -x "$MODPATH/bin/baa_patch" ] || chmod 0755 "$MODPATH/bin/baa_patch"
+LIVE_P="$(digest "$P")"; LIVE_C="$(digest "$C")"
+valid_sha "$LIVE_P" && valid_sha "$LIVE_C" || abort "! OEM source hashes unavailable"
+SOURCE_P="$LIVE_P"; SOURCE_C="$LIVE_C"
+if [ -r "$OLD/module.prop" ] && [ -r "$OP" ] && [ -r "$OC" ] &&
+   [ "$LIVE_P" = "$(digest "$OP")" ] && [ "$LIVE_C" = "$(digest "$OC")" ]; then
+  ui_print "- Previously generated BAA_ENC pair is actively mounted"
+  case "$(sed -n 's/^version=//p' "$OLD/module.prop")" in
+    1.3.0)
+      [ "$LIVE_P" = 21f267901bbc09981e37538749ef94275c23ffeac88e95bd44658fd02f5e8759 ] &&
+      [ "$LIVE_C" = f7f41e1c649ba43ca3eee3378e75356b26de3ab54179d77f8c261688f9e9689c ] ||
+        abort "! Unknown v1.3.0 hotfix provenance"
+      SOURCE_P=a03abd594154588667684b8c09ceccbd51e5d9875fc827e0eee08d8d4c1ecad5
+      SOURCE_C=83aac16d8bed63170c856b41b1d280e1720a2738131b5de326ae40dbcffdfd44 ;;
+    1.4.*)
+      [ -r "$OLD/private/verified.sha256" ] || abort "! Missing previous validation metadata"
+      SOURCE_P="$(sed -n 's/^P_SOURCE=//p' "$OLD/private/verified.sha256")"
+      SOURCE_C="$(sed -n 's/^C_SOURCE=//p' "$OLD/private/verified.sha256")"
+      valid_sha "$SOURCE_P" && valid_sha "$SOURCE_C" || abort "! Previous source hash invalid" ;;
+    *) abort "! Unknown existing BAA overlay; disable previous version and reboot" ;;
+  esac
+  cp "$OP" "$PP" && cp "$OC" "$CP" || abort "! Cannot migrate validated BAA overlay"
+  ui_print "- Preserving verified device-generated overlay during upgrade"
 else
-  abort "! Unknown OEM/modified BAA config SHA-256; original retained"
+  # Works with another HyperOS version ONLY when real vendor crypto and the
+  # tested JSON safety schema both match; no incremental / SDK hard-coding.
+  "$MODPATH/bin/baa_patch" "$P" "$C" "$PP" "$CP" ||
+    abort "! BAA crypto or OEM JSON policy schema incompatible; stock retained"
+  ui_print "- OEM capability and bounded JSON schema validated"
 fi
-[ "$(head -c 8 "$PP")" = BAA_ENC: ] && [ "$(head -c 8 "$CP")" = BAA_ENC: ] || abort "! Generated ciphertext missing magic"
-NP="$(digest "$PP")"
-NC="$(digest "$CP")"
-[ "$(expr "$NP" : '[0-9a-f]*$')" = 64 ] || abort "! Invalid pudding digest"
-[ "$(expr "$NC" : '[0-9a-f]*$')" = 64 ] || abort "! Invalid common digest"
-printf 'P_NEW=%s\nC_NEW=%s\n' "$NP" "$NC" > "$MODPATH/private/verified.sha256" || abort "! Cannot save verification metadata"
+NP="$(digest "$PP")"; NC="$(digest "$CP")"
+valid_sha "$NP" && valid_sha "$NC" || abort "! Failed to hash private encrypted files"
+cat > "$META" <<EOF
+P_SOURCE=$SOURCE_P
+C_SOURCE=$SOURCE_C
+P_NEW=$NP
+C_NEW=$NC
+mode=validated-vendor-baa-schema
+device=pudding
+EOF
 set_perm "$MODPATH/post-fs-data.sh" 0 0 0755
 set_perm "$MODPATH/service.sh" 0 0 0755
 set_perm "$MODPATH/action.sh" 0 0 0755
@@ -52,6 +70,8 @@ set_perm "$MODPATH/uninstall.sh" 0 0 0755
 set_perm "$MODPATH/bin/baa_patch" 0 0 0755
 set_perm "$PP" 0 0 0644
 set_perm "$CP" 0 0 0644
-set_perm "$MODPATH/private/verified.sha256" 0 0 0600
-chcon u:object_r:batteryantiaging_cfg_file:s0 "$PP" "$CP" || abort "! Cannot apply vendor config SELinux labels"
-ui_print "- Checks passed; restart required. Thermal/voltage/current tables remain OEM."
+set_perm "$META" 0 0 0600
+chcon u:object_r:batteryantiaging_cfg_file:s0 "$PP" "$CP" ||
+  abort "! OEM BAA SELinux interface incompatible"
+ui_print "- Preserved all other OEM charge voltage/current/thermal tables"
+ui_print "- No OS-version or fixed OEM ciphertext hash gate; reboot required"
