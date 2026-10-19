@@ -10,7 +10,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: android-actions/setup-android@v3
       - name: Install Android NDK
         run: yes | sdkmanager --install "ndk;27.2.12479018"
       - name: Compile Android arm64 probe
