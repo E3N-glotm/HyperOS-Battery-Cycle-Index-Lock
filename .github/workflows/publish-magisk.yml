@@ -1,8 +1,9 @@
-name: Publish Magisk versioned Release ZIP
+name: Build and publish capability-detected battery module
 on:
   push:
     branches: [main]
-    paths: ['module.prop']
+    paths: ['module.prop', 'customize.sh', 'post-fs-data.sh', 'service.sh', 'src/baa_patch.cpp', '.github/workflows/publish-magisk.yml']
+  workflow_dispatch:
 permissions:
   contents: write
 jobs:
@@ -15,13 +16,13 @@ jobs:
           packages: 'platform-tools'
       - name: Install Android NDK
         run: yes | sdkmanager --install "ndk;27.2.12479018"
-      - name: Download JSON parser (MIT licensed)
+      - name: Download licensed nlohmann JSON header
         run: |
           set -euo pipefail
           mkdir -p .build/include/nlohmann
           curl -fsSL --retry 3 'https://raw.githubusercontent.com/nlohmann/json/v3.12.0/single_include/nlohmann/json.hpp' -o .build/include/nlohmann/json.hpp
           test "$(wc -c < .build/include/nlohmann/json.hpp)" -gt 500000
-      - name: Compile ARM64 vendor crypto adapter
+      - name: Compile Android ARM64 native vendor crypto helper
         run: |
           set -euo pipefail
           CXX="$ANDROID_HOME/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang++"
@@ -29,79 +30,50 @@ jobs:
           "$CXX" -std=c++17 -O2 -Wall -Wextra -Werror -fPIE -pie -I.build/include src/baa_patch.cpp -ldl -o .build/bin/baa_patch
           file .build/bin/baa_patch
           sha256sum .build/bin/baa_patch
-      - name: Validate and package pure Magisk module
+      - name: Shell static checks and Magisk ZIP creation
         run: |
           set -euo pipefail
           for f in customize.sh post-fs-data.sh service.sh action.sh uninstall.sh; do bash -n "$f"; done
+          ! grep -E 'ro\.build\.version\.(incremental|sdk)' customize.sh post-fs-data.sh service.sh
+          grep -q 'BAA_ENC' customize.sh
+          grep -q 'P_SOURCE=' post-fs-data.sh
+          grep -q 'crypto.decrypt' src/baa_patch.cpp
           VERSION="$(sed -n 's/^version=//p' module.prop)"
           test "$VERSION" = "1.4.0"
           mkdir -p dist/staging/bin
           cp module.prop customize.sh post-fs-data.sh service.sh action.sh uninstall.sh dist/staging/
           cp .build/bin/baa_patch dist/staging/bin/
-          chmod 0755 dist/staging/{post-fs-data.sh,service.sh,action.sh,uninstall.sh,bin/baa_patch}
-          FILE="HyperOS-Battery-Cycle-Index-Lock-v${VERSION}.zip"
-          (cd dist/staging && zip -q -r -X "../$FILE" .)
+          chmod 0755 dist/staging/post-fs-data.sh dist/staging/service.sh dist/staging/action.sh dist/staging/uninstall.sh dist/staging/bin/baa_patch
+          FILE="HyperOS-Battery-Cycle-Index-Lock-v$VERSION.zip"
+          (cd dist/staging && zip -qr -X "../$FILE" .)
           unzip -t "dist/$FILE"
-          unzip -Z1 "dist/$FILE"
           if unzip -Z1 "dist/$FILE" | grep -Ei 'BAA_config|private/|stock.*json|\.enc$'; then
-            echo 'Forbidden proprietary battery config embedded in ZIP'
+            echo 'Refusing to redistribute proprietary OEM encrypted data'
             exit 1
           fi
-          test "$(unzip -p "dist/$FILE" module.prop | grep -c '^version=1.4.0)" -eq 1
           sha256sum "dist/$FILE"
-      - name: Tag and publish ZIP
+      - uses: actions/upload-artifact@v4
+        with:
+          name: battery-capability-module
+          path: dist/HyperOS-Battery-Cycle-Index-Lock-v*.zip
+      - name: Publish new version
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: \${{ github.token }}
         run: |
           set -euo pipefail
           VERSION="$(sed -n 's/^version=//p' module.prop)"
-          TAG="v${VERSION}"
-          ZIP="dist/HyperOS-Battery-Cycle-Index-Lock-v${VERSION}.zip"
+          TAG="v$VERSION"
+          ZIP="dist/HyperOS-Battery-Cycle-Index-Lock-v$VERSION.zip"
           if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Release $TAG already exists: will not overwrite a published binary."
-            exit 1
+            echo "Release $TAG exists; retaining immutable artifact"
+            exit 0
           fi
           HASH="$(sha256sum "$ZIP" | awk '{print $1}')"
-          BINHASH="$(sha256sum .build/bin/baa_patch | awk '{print $1}')"
           {
-            echo "HyperOS 4 / Android 17. Xiaomi pudding OS4.0.4.0.XPCCNXM API37 only."
-            echo
-            echo "Install in Magisk; reboot. Installer generates encrypted BAA configs from the user's own exact-ROM OEM files, or carries forward a verified on-device v1.3.0 hotfix."
-            echo "CN/GL index=1; LowSoh only cycle>=801 and raw SOH<=50. Stock charger voltage/current/temperature tables unchanged."
-            echo
-            echo "ZIP SHA256: $HASH"
-            echo "BAA ARM64 helper SHA256: $BINHASH"
-            echo
-            echo "No OEM proprietary battery configuration is bundled. Invalid ROM/input/config fingerprints are rejected."
-            echo "WARNING: fixed new-battery profile may accelerate wear over time. Disable module and reboot to restore stock."
-          } > dist/RELEASE_NOTES.md
-          gh release create "$TAG" "$ZIP" --target "$GITHUB_SHA" --title "HyperOS Battery Cycle + SOH Index Lock $TAG" --notes-file dist/RELEASE_NOTES.md --prerelease
-)" -eq 1
-          sha256sum "dist/$FILE"
-      - name: Tag and publish ZIP
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          VERSION="$(sed -n 's/^version=//p' module.prop)"
-          TAG="v${VERSION}"
-          ZIP="dist/HyperOS-Battery-Cycle-Index-Lock-v${VERSION}.zip"
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Release $TAG already exists: will not overwrite a published binary."
-            exit 1
-          fi
-          HASH="$(sha256sum "$ZIP" | awk '{print $1}')"
-          BINHASH="$(sha256sum .build/bin/baa_patch | awk '{print $1}')"
-          {
-            echo "HyperOS 4 / Android 17. Xiaomi pudding OS4.0.4.0.XPCCNXM API37 only."
-            echo
-            echo "Install in Magisk; reboot. Installer generates encrypted BAA configs from the user's own exact-ROM OEM files, or carries forward a verified on-device v1.3.0 hotfix."
-            echo "CN/GL index=1; LowSoh only cycle>=801 and raw SOH<=50. Stock charger voltage/current/temperature tables unchanged."
-            echo
-            echo "ZIP SHA256: $HASH"
-            echo "BAA ARM64 helper SHA256: $BINHASH"
-            echo
-            echo "No OEM proprietary battery configuration is bundled. Invalid ROM/input/config fingerprints are rejected."
-            echo "WARNING: fixed new-battery profile may accelerate wear over time. Disable module and reboot to restore stock."
-          } > dist/RELEASE_NOTES.md
-          gh release create "$TAG" "$ZIP" --target "$GITHUB_SHA" --title "HyperOS Battery Cycle + SOH Index Lock $TAG" --notes-file dist/RELEASE_NOTES.md --prerelease
+            echo "Compatibility is detected from the pudding hardware identity, real vendor BAA_ENC decoder ABI, OEM JSON schema, and BMS cycle/SOH nodes; no HyperOS build or SDK whitelist."
+            echo "The original OEM ciphertext is never distributed. Only the target cycle map/LowSoh fields change."
+            echo "Original OEM source SHA256 is pinned at install time and rechecked at boot; if firmware changes source data, the module skips safely until reinstalled."
+            echo "Risk: keeping new-battery charging profile after aging can accelerate wear."
+            echo "SHA256: $HASH"
+          } > RELEASE_NOTES.md
+          gh release create "$TAG" "$ZIP" --target "$GITHUB_SHA" --title "Battery Cycle & SOH Index Lock $TAG" --notes-file RELEASE_NOTES.md --prerelease
