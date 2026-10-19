@@ -1,0 +1,41 @@
+name: Build BAA JSON patch generator (lab)
+on:
+  push:
+    branches: [experiment/hyperos4-baa-enc]
+    paths: ['lab/baa_patch.cpp', '.github/workflows/baa-patch-lab.yml']
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
+      - name: Install Android NDK
+        run: yes | sdkmanager --install "ndk;27.2.12479018"
+      - name: Download MIT-licensed single header JSON parser
+        run: |
+          mkdir -p lab/include/nlohmann
+          curl --retry 3 --fail -sSL 'https://raw.githubusercontent.com/nlohmann/json/v3.12.0/single_include/nlohmann/json.hpp' -o lab/include/nlohmann/json.hpp
+          test "$(wc -c < lab/include/nlohmann/json.hpp)" -gt 500000
+      - name: Compile Android arm64 native patch generator
+        run: |
+          set -euo pipefail
+          CXX="$ANDROID_HOME/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang++"
+          "$CXX" -std=c++17 -O2 -Wall -Wextra -Werror -fPIE -pie -Ilab/include \
+            lab/baa_patch.cpp -ldl -o baa_patch
+          file baa_patch
+          sha256sum baa_patch
+      - name: Attach isolated test binary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag=v1.3.0-lab-patch1
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" baa_patch --clobber
+          else
+            gh release create "$tag" baa_patch --target "$GITHUB_SHA" --title "v1.3.0 experimental native BAA patch generator" --notes "TEST BINARY ONLY. Not an installable Magisk module, does not carry vendor configs. Requires exact supported device config and separately controlled installation." --prerelease
+          fi
