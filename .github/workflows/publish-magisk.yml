@@ -1,4 +1,4 @@
-name: Publish Magisk v1.3.0 Release ZIP
+name: Publish Magisk versioned Release ZIP
 on:
   push:
     branches: [main]
@@ -34,7 +34,7 @@ jobs:
           set -euo pipefail
           for f in customize.sh post-fs-data.sh service.sh action.sh uninstall.sh; do bash -n "$f"; done
           VERSION="$(sed -n 's/^version=//p' module.prop)"
-          test "$VERSION" = "1.3.0"
+          test "$VERSION" = "1.4.0"
           mkdir -p dist/staging/bin
           cp module.prop customize.sh post-fs-data.sh service.sh action.sh uninstall.sh dist/staging/
           cp .build/bin/baa_patch dist/staging/bin/
@@ -47,7 +47,36 @@ jobs:
             echo 'Forbidden proprietary battery config embedded in ZIP'
             exit 1
           fi
-          test "$(unzip -p "dist/$FILE" module.prop | grep -c '^version=1.3.0$')" -eq 1
+          test "$(unzip -p "dist/$FILE" module.prop | grep -c '^version=1.4.0)" -eq 1
+          sha256sum "dist/$FILE"
+      - name: Tag and publish ZIP
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION="$(sed -n 's/^version=//p' module.prop)"
+          TAG="v${VERSION}"
+          ZIP="dist/HyperOS-Battery-Cycle-Index-Lock-v${VERSION}.zip"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists: will not overwrite a published binary."
+            exit 1
+          fi
+          HASH="$(sha256sum "$ZIP" | awk '{print $1}')"
+          BINHASH="$(sha256sum .build/bin/baa_patch | awk '{print $1}')"
+          {
+            echo "HyperOS 4 / Android 17. Xiaomi pudding OS4.0.4.0.XPCCNXM API37 only."
+            echo
+            echo "Install in Magisk; reboot. Installer generates encrypted BAA configs from the user's own exact-ROM OEM files, or carries forward a verified on-device v1.3.0 hotfix."
+            echo "CN/GL index=1; LowSoh only cycle>=801 and raw SOH<=50. Stock charger voltage/current/temperature tables unchanged."
+            echo
+            echo "ZIP SHA256: $HASH"
+            echo "BAA ARM64 helper SHA256: $BINHASH"
+            echo
+            echo "No OEM proprietary battery configuration is bundled. Invalid ROM/input/config fingerprints are rejected."
+            echo "WARNING: fixed new-battery profile may accelerate wear over time. Disable module and reboot to restore stock."
+          } > dist/RELEASE_NOTES.md
+          gh release create "$TAG" "$ZIP" --target "$GITHUB_SHA" --title "HyperOS Battery Cycle + SOH Index Lock $TAG" --notes-file dist/RELEASE_NOTES.md --prerelease
+)" -eq 1
           sha256sum "dist/$FILE"
       - name: Tag and publish ZIP
         env:
