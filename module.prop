@@ -1,6 +1,6 @@
 id=battery_cycle_aging_switch_off
 name=HyperOS Battery Cycle + SOH Index Lock
-version=1.3.0
-versionCode=130
+version=1.4.0
+versionCode=140
 author=E3N
-description=Android 17 HyperOS OS4.0.4.0.XPCCNXM pudding. On-device encrypted BAA config generation, CN/GL cycle index1, LowSoh>=801 cycles and raw SOH<=50; OEM current/thermal tables preserved, fail-closed.
+description=Capability-probed vendor BAA_ENC crypto + checked OEM schema for pudding; preserves all OEM voltage/current/thermal profiles. No ROM version gate; OTA source changes fail closed until reinstall. CN/GL index1, LowSoh cycles>=801 raw SOH<=50.
