@@ -1,21 +1,16 @@
 #!/system/bin/sh
-MODDIR=${0%/*}
-P=/odm/etc/charger/BAA_config_pudding.json
-C=/odm/etc/charger/BAA_config_common.json
-echo "=== HyperOS Battery Cycle + SOH Index Lock ==="
+MODDIR=/data/adb/modules/battery_cycle_aging_switch_off
+echo "=== HyperOS Battery Cycle + SOH Index Lock v1.3.0 ==="
 cat "$MODDIR/status.txt" 2>/dev/null || echo "Status unavailable"
-echo
-echo "Device : $(getprop ro.product.device)"
-echo "Build  : $(getprop ro.build.version.incremental)"
-echo "Cycle  : $(cat /sys/class/xm_power/fg_master/cyclecount 2>/dev/null)"
-echo "Raw SOH: $(cat /sys/class/xm_power/fg_master/soh 2>/dev/null)"
-echo "UI SOH : $(cat /sys/class/xm_power/fg_master/soh_new 2>/dev/null)"
-echo
-echo "BasedOnCC live map:"
-grep -n -A3 '"cyclecount_index_map"' "$P" 2>/dev/null
-echo
-echo "LowSoh live trigger:"
-grep -n -A16 '"LowSoh-FvDown"' "$C" 2>/dev/null
-echo
-echo "Expected: cyclecount >= 801 AND raw SOH <= 50."
-echo "Disable/uninstall + reboot restores the stock Xiaomi policy."
+echo "Build: $(getprop ro.build.version.incremental)"
+for key in cyclecount soh soh_new; do
+  printf '%s=' "$key"
+  cat "/sys/class/xm_power/fg_master/$key" 2>/dev/null || echo unreadable
+done
+echo "=== Live BAA_ENC config SHA-256 ==="
+sha256sum /odm/etc/charger/BAA_config_pudding.json /odm/etc/charger/BAA_config_common.json 2>/dev/null
+echo "=== Vendor batteryantiaging service PID ==="
+pidof vendor.xiaomi.hardware.batteryantiaging-service || true
+echo "=== OEM protection ==="
+echo "Other thermal, overvoltage and overcurrent tables remain unchanged."
+echo "Disable module and reboot to restore stock config."
