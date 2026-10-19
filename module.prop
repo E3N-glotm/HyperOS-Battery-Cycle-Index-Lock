@@ -1,6 +1,6 @@
 id=battery_cycle_aging_switch_off
 name=HyperOS Battery Cycle + SOH Index Lock
-version=1.2.0
-versionCode=120
+version=1.3.0
+versionCode=130
 author=E3N
-description=Locks Xiaomi BasedOnCC-VolDown cyclecount_index to index 1 for all cycle counts and defers LowSoh-FvDown until cyclecount >= 801 and raw SOH <= 50 on pudding / OS3.0.319.0.WPCCNXM. Systemless; disable/uninstall + reboot restores stock.
+description=Android 17 HyperOS OS4.0.4.0.XPCCNXM pudding. On-device encrypted BAA config generation, CN/GL cycle index1, LowSoh>=801 cycles and raw SOH<=50; OEM current/thermal tables preserved, fail-closed.
