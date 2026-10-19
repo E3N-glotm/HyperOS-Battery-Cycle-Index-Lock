@@ -1,5 +1,13 @@
 # HyperOS Battery Cycle + SOH Index Lock
 
+## v1.4.0: 按实际接口兼容 / Capability detection
+
+- 不按 Android SDK 或 HyperOS 小版本号判断；需要 **pudding 电池硬件配置**、原厂 `BAA_ENC` 文件、同 ABI 的 `libbaa_common.so` 解密/加密符号、BMS 循环次数/SOH 节点和通过验证的原厂 JSON 策略结构。
+- 安装时在本机重新生成两份加密文件，先进行完整的结构化差异和回解密一致性校验；仅修改 CN/GL cycle index 与两份 LowSoh 门槛，不直接写 OEM 分区。
+- **升级后源文件内容发生变化时将停止挂载旧配置**。在新 ROM 上重新安装 v1.4.0 后才能重新检测和生成。接口存在但策略字段结构不符合安全断言时仍会拒绝启用。
+- 保留 `pudding` 设备/电芯配置限制，因为充电电压表不能只凭路径存在就视作其他机型安全。此项修改不会使电池恢复健康度，可能弱化原厂老化保护。
+
+
 [中文](#中文) · [English](#english) · [Releases](https://github.com/E3N-glotm/HyperOS-Battery-Cycle-Index-Lock/releases)
 
 ## 中文
