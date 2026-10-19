@@ -2,7 +2,7 @@ name: HyperOS 4 BAA vendor crypto compatibility lab
 on:
   push:
     branches: [experiment/hyperos4-baa-enc]
-    paths: ['lab/baa_crypt_probe.cpp']
+    paths: ['lab/baa_crypt_probe.cpp', '.github/workflows/hyperos4-baa-lab.yml']
 permissions:
   contents: write
 jobs:
@@ -11,7 +11,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install Android NDK
-        run: yes | sdkmanager --install "ndk;27.2.12479018"
+        run: yes | /usr/local/lib/android/sdk/cmdline-tools/16.0/bin/sdkmanager --install "ndk;27.2.12479018"
       - name: Compile Android arm64 probe
         run: |
           set -euo pipefail
