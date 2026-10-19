@@ -1,67 +1,53 @@
 #!/system/bin/sh
-MODDIR=${0%/*}
-TAG=BatteryAgingPolicyLock
-PUDDING=/odm/etc/charger/BAA_config_pudding.json
-COMMON=/odm/etc/charger/BAA_config_common.json
-PUDDING_PATCHED="$MODDIR/private/BAA_config_pudding.json"
-COMMON_PATCHED="$MODDIR/private/BAA_config_common.json"
+MODDIR=/data/adb/modules/battery_cycle_aging_switch_off
 STATUS="$MODDIR/status.txt"
-
-PUDDING_STOCK_SHA=470c21966dd8637eaf113532ccb4d0fb85ee2ac5763b50bcda3bc3ba33be9b25
-PUDDING_PATCHED_SHA=f9a3bb27c9a574714683f939bad7fbfb4471c614252b74d9d4dcd255327464fb
-COMMON_STOCK_SHA=6b8bd170810019ff7d144f8f11636dfb8140fbd6356ddfe71a50c8d08d3b2701
-COMMON_PATCHED_SHA=989ee3ff894a17808b9d8b45cbdaa1fd7de981f4c79a5a21be506a5c0e2115b8
-
-report() {
-  printf '%s\n' "$1" > "$STATUS"
-  /system/bin/log -p i -t "$TAG" "$1" 2>/dev/null || true
-}
-fail() {
-  report "FAILED: $*"
+P=/odm/etc/charger/BAA_config_pudding.json
+C=/odm/etc/charger/BAA_config_common.json
+PP="$MODDIR/private/BAA_config_pudding.json"
+CP="$MODDIR/private/BAA_config_common.json"
+META="$MODDIR/private/verified.sha256"
+PS=a03abd594154588667684b8c09ceccbd51e5d9875fc827e0eee08d8d4c1ecad5
+CS=83aac16d8bed63170c856b41b1d280e1720a2738131b5de326ae40dbcffdfd44
+say() { printf '%s\n' "$1" > "$STATUS"; /system/bin/log -p i -t BatteryAgingPolicyLock "$1" 2>/dev/null || true; }
+fail() { say "INACTIVE: $*; stock preserved"; exit 0; }
+digest() { sha256sum "$1" 2>/dev/null | cut -d ' ' -f1; }
+ns() { /system/bin/nsenter -t 1 -m -- "$@"; }
+[ "$(getprop ro.product.device)" = pudding ] || fail "device mismatch"
+[ "$(getprop ro.build.version.incremental)" = OS4.0.4.0.XPCCNXM ] || fail "ROM mismatch"
+[ "$(getprop ro.build.version.sdk)" = 37 ] || fail "API mismatch"
+[ -x /system/bin/nsenter ] || fail "nsenter unavailable"
+[ -r "$META" ] || fail "no installer validation metadata"
+P_NEW="$(sed -n 's/^P_NEW=//p' "$META")"
+C_NEW="$(sed -n 's/^C_NEW=//p' "$META")"
+[ "$(expr "$P_NEW" : '[0-9a-f]*$')" = 64 ] || fail "invalid pudding SHA metadata"
+[ "$(expr "$C_NEW" : '[0-9a-f]*$')" = 64 ] || fail "invalid common SHA metadata"
+for f in "$P" "$C" "$PP" "$CP"; do
+  [ -r "$f" ] || fail "missing $f"
+  [ "$(head -c 8 "$f")" = BAA_ENC: ] || fail "invalid encrypted config header"
+done
+[ "$(digest "$PP")" = "$P_NEW" ] || fail "private pudding ciphertext mismatch"
+[ "$(digest "$CP")" = "$C_NEW" ] || fail "private common ciphertext mismatch"
+SOURCE_P="$(ns /system/bin/sha256sum "$P" 2>/dev/null | cut -d' ' -f1)"
+SOURCE_C="$(ns /system/bin/sha256sum "$C" 2>/dev/null | cut -d' ' -f1)"
+if [ "$SOURCE_P" = "$P_NEW" ] && [ "$SOURCE_C" = "$C_NEW" ]; then
+  say "MOUNTED: BAA_ENC configs already active"
   exit 0
-}
-
-[ "$(getprop ro.product.device)" = "pudding" ] || fail "device mismatch; stock retained"
-[ "$(getprop ro.build.version.incremental)" = "OS3.0.319.0.WPCCNXM" ] || fail "ROM mismatch; stock retained"
-[ "$(getprop ro.build.version.sdk)" = "36" ] || fail "SDK mismatch; stock retained"
-
-for f in "$PUDDING" "$COMMON" "$PUDDING_PATCHED" "$COMMON_PATCHED"; do
-  [ -r "$f" ] || fail "required config unreadable: $f"
-done
-
-P_SRC="$(sha256sum "$PUDDING" 2>/dev/null | cut -d ' ' -f 1)"
-C_SRC="$(sha256sum "$COMMON" 2>/dev/null | cut -d ' ' -f 1)"
-P_DST="$(sha256sum "$PUDDING_PATCHED" 2>/dev/null | cut -d ' ' -f 1)"
-C_DST="$(sha256sum "$COMMON_PATCHED" 2>/dev/null | cut -d ' ' -f 1)"
-
-[ "$P_SRC" = "$PUDDING_STOCK_SHA" ] || [ "$P_SRC" = "$PUDDING_PATCHED_SHA" ] || fail "pudding config hash mismatch"
-[ "$C_SRC" = "$COMMON_STOCK_SHA" ] || [ "$C_SRC" = "$COMMON_PATCHED_SHA" ] || fail "common config hash mismatch"
-[ "$P_DST" = "$PUDDING_PATCHED_SHA" ] || fail "patched pudding hash mismatch"
-[ "$C_DST" = "$COMMON_PATCHED_SHA" ] || fail "patched common hash mismatch"
-
-[ "$(grep -c '{"idx":1, "min": 1, "max": 2147483647}' "$PUDDING_PATCHED" 2>/dev/null)" = "2" ] || fail "index-1 map validation failed"
-[ "$(grep -c '"range_min": 801' "$COMMON_PATCHED" 2>/dev/null)" = "1" ] || fail "LowSoh min validation failed"
-[ "$(grep -c '"range_max": 2147483647' "$COMMON_PATCHED" 2>/dev/null)" = "1" ] || fail "LowSoh max validation failed"
-[ "$(grep -c '"threshold": 50' "$COMMON_PATCHED" 2>/dev/null)" = "1" ] || fail "LowSoh threshold validation failed"
-
-for f in "$PUDDING_PATCHED" "$COMMON_PATCHED"; do
-  chown 0:0 "$f" 2>/dev/null || true
-  chmod 0644 "$f" || fail "cannot chmod $f"
-  chcon u:object_r:vendor_configs_file:s0 "$f" 2>/dev/null || true
-done
-
-if [ -x /system/bin/nsenter ]; then
-  /system/bin/nsenter -t 1 -m -- /system/bin/mount --bind "$PUDDING_PATCHED" "$PUDDING" || fail "pudding bind mount failed"
-  /system/bin/nsenter -t 1 -m -- /system/bin/mount --bind "$COMMON_PATCHED" "$COMMON" || fail "common bind mount failed"
-else
-  /system/bin/mount --bind "$PUDDING_PATCHED" "$PUDDING" || fail "pudding bind mount failed"
-  /system/bin/mount --bind "$COMMON_PATCHED" "$COMMON" || fail "common bind mount failed"
 fi
-
-[ "$(grep -c '{"idx":1, "min": 1, "max": 2147483647}' "$PUDDING" 2>/dev/null)" = "2" ] || fail "live index map verification failed"
-[ "$(grep -c '"range_min": 801' "$COMMON" 2>/dev/null)" = "1" ] || fail "live LowSoh min verification failed"
-[ "$(grep -c '"range_max": 2147483647' "$COMMON" 2>/dev/null)" = "1" ] || fail "live LowSoh max verification failed"
-[ "$(grep -c '"threshold": 50' "$COMMON" 2>/dev/null)" = "1" ] || fail "live LowSoh threshold verification failed"
-
-report "ACTIVE: BasedOnCC index=1 for all cycles; LowSoh only at cycle>=801 AND raw SOH<=50"
+[ "$SOURCE_P" = "$PS" ] && [ "$SOURCE_C" = "$CS" ] || fail "source files not the pinned OEM pair"
+chown 0:0 "$PP" "$CP" || fail "chown failed"
+chmod 0644 "$PP" "$CP" || fail "chmod failed"
+chcon u:object_r:batteryantiaging_cfg_file:s0 "$PP" "$CP" || fail "SELinux label failed"
+ns /system/bin/mount --bind "$PP" "$P" || fail "pudding mount failed"
+if ! ns /system/bin/mount --bind "$CP" "$C"; then
+  ns /system/bin/umount "$P" 2>/dev/null
+  fail "common mount failed; rollback pudding"
+fi
+LIVE_P="$(ns /system/bin/sha256sum "$P" 2>/dev/null | cut -d' ' -f1)"
+LIVE_C="$(ns /system/bin/sha256sum "$C" 2>/dev/null | cut -d' ' -f1)"
+if [ "$LIVE_P" != "$P_NEW" ] || [ "$LIVE_C" != "$C_NEW" ]; then
+  ns /system/bin/umount "$C" 2>/dev/null
+  ns /system/bin/umount "$P" 2>/dev/null
+  fail "runtime ciphertext SHA mismatch; both mounts rolled back"
+fi
+say "MOUNTED: BAA_ENC index=1 CN/GL; LowSoh cycle>=801 and raw SOH<=50"
 exit 0
