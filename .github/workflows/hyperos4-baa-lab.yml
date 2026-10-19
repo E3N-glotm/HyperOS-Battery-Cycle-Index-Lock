@@ -1,0 +1,33 @@
+name: HyperOS 4 BAA vendor crypto compatibility lab
+on:
+  push:
+    branches: [experiment/hyperos4-baa-enc]
+    paths: ['lab/baa_crypt_probe.cpp']
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: android-actions/setup-android@v3
+      - name: Install Android NDK
+        run: yes | sdkmanager --install "ndk;27.2.12479018"
+      - name: Compile Android arm64 probe
+        run: |
+          set -euo pipefail
+          CXX="$ANDROID_HOME/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang++"
+          "$CXX" -std=c++17 -O2 -Wall -Wextra -Werror -fPIE -pie lab/baa_crypt_probe.cpp -ldl -o baa_crypt_probe
+          file baa_crypt_probe
+          sha256sum baa_crypt_probe
+      - name: Publish lab probe binary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag=v1.3.0-lab-crypto1
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" baa_crypt_probe --clobber
+          else
+            gh release create "$tag" baa_crypt_probe --target "$GITHUB_SHA" --title "BAA vendor encryption compatibility probe - not an installable Magisk module" --notes "Experimental on-device ciphertext roundtrip probe. Contains no vendor library or charging configuration. Does not modify the running charging strategy. File input/output is restricted to staging paths." --prerelease
+          fi
