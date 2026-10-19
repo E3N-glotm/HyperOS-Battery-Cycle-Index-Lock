@@ -1,197 +1,63 @@
 # HyperOS Battery Cycle + SOH Index Lock
 
-[中文](#中文) | [English](#english)
-
-A small Magisk module for a specific Xiaomi HyperOS build that keeps Xiaomi's `BasedOnCC-VolDown` cycle-count charging profile permanently on `cyclecount_index = 1`, and defers `LowSoh-FvDown` until cycle count >= 801 and raw SOH <= 50.
-
-> Tested target: `pudding` / `OS3.0.319.0.WPCCNXM` / Android 16 (SDK 36)
+[中文](#中文) · [English](#english) · [Releases](https://github.com/E3N-glotm/HyperOS-Battery-Cycle-Index-Lock/releases)
 
 ## 中文
 
-### 作用
+### v1.3.0 — HyperOS 4 / Android 17
 
-这台设备的原厂 `BAA_config_pudding.json` 会按照电池循环次数切换 `BasedOnCC-VolDown` 充电档位：
+**仅支持** Xiaomi `pudding`、`OS4.0.4.0.XPCCNXM`、Android 17（API 37）及下面锁定的原厂电池配置。不是通用充电增强模块。
 
-| 循环次数 | 原厂 cyclecount_index |
-|---|---:|
-| 1–100 | 1 |
-| 101–300 | 2 |
-| 301–800 | 3 |
-| 801+ | 4 |
+本模块将原厂 `BasedOnCC-VolDown` 的 CN/GL 电池循环次数映射固定到 `cyclecount_index=1`，并把**机型配置和通用配置**的 `LowSoh-FvDown` 修改为仅在循环次数至少 801 次、原始 SOH 不高于 50 时触发；以上两个 LowSoh 条件必须同时满足。
 
-本模块将 CN/GL 两套电池配置中的 `cyclecount_index_map` 改为：
+修改严格限于五条 JSON 字段路径：两套 `cyclecount_index_map`，以及机型和通用文件各三项 LowSoh 阈值字段（合计八处字段或子树变化）。保持原厂每个充电温度区间、电压表、充电电流阶梯、`FreqChg-FvDown`、`ChargerModeProtect` 不变；不修改真实循环次数、BMS SOH、FCC，也不关闭内核/PMIC 过流、过压或温控保护。
 
-```json
-[
-  {"idx": 1, "min": 1, "max": 2147483647}
-]
-```
+**HyperOS 4 改用 `BAA_ENC:` 加密文件。** v1.3.0 Release ZIP **不包含任何从设备复制的原厂加密配置、明文电池参数或加密密钥**，而是在安装时使用手机自己的 `/vendor/lib64/libbaa_common.so` 完成解密、有限 JSON 修改、重新加密与解密回读验证。构建程序只包含通用逻辑，JSON 解析器使用 MIT 许可的 [nlohmann/json](https://github.com/nlohmann/json)。两个私有加密配置仅写入本机 Magisk 模块目录。
 
-因此无论实际循环次数是多少，`BasedOnCC-VolDown` 都只会选择 index 1，也就是原厂 1–100 次循环使用的那套充电参数。
+版本与哈希校验：
 
-同时，原厂 `BAA_config_common.json` 中的 `LowSoh-FvDown` 条件由：
+| 项目 | 仅允许的值 |
+| --- | --- |
+| 设备 | pudding |
+| ROM | OS4.0.4.0.XPCCNXM |
+| SDK | 37 |
+| 原厂 pudding BAA SHA-256 | `a03abd594154588667684b8c09ceccbd51e5d9875fc827e0eee08d8d4c1ecad5` |
+| 原厂 common BAA SHA-256 | `83aac16d8bed63170c856b41b1d280e1720a2738131b5de326ae40dbcffdfd44` |
 
-- 循环次数：`200–800`
-- raw SOH 阈值：`<= 85`
+支持从**已验证的此设备 v1.3.0 热修复版本**原位迁移；遇到其他 ROM、加密配置哈希或未经确认的预先修改配置时直接停止安装（fail closed），不会猜测新的安全电压或修改系统分区。
 
-改为：
+### 安装、状态和恢复
 
-- 循环次数：`801+`
-- raw SOH 阈值：`<= 50`
+在 Magisk 中选择本仓库 Release 下 `HyperOS-Battery-Cycle-Index-Lock-v1.3.0.zip`，安装并重启。点击模块的“操作”按钮可读取状态、真实循环计数、原始 SOH、UI SOH、实际挂载配置 SHA-256 和原厂抗老化进程 PID。
 
-两个条件需要同时满足才会触发 LowSoh 降压。
+启动脚本在 PID 1 mount namespace 对两份配置执行 systemless bind mount；挂载后用安装时生成的 SHA-256 重新检查。任一校验失败则不继续套用未知配置，且尝试回滚部分挂载。停用/卸载模块后重启，恢复原厂配置与原厂循环分档，不会对 ODM/Vendor 做持久写入。
 
-### 它没有做什么
+原厂默认循环档位是 1–100→1、101–300→2、301–800→3、801+→4。固定 `index=1` 后，随电芯实际循环增加，将丧失这项分档降压保护。**这可能加快高 SOC、高电压或高温下的电池老化，不会令旧电池重新变新。** LowSoh 的触发被延后也会弱化厂家设计的寿命策略，请在充分理解风险的情况下使用。
 
-本模块**不会**：
+**实机测试（2026-10-19）：** OS4.0.4.0 / API37；原始循环次数 112，raw SOH=96，UI SOH=99。v1.3.0 热修复版本中两份 BAA_ENC 文件冷启动挂载成功，原厂 `batteryantiaging` 服务运行，开机挂载文件可以通过原厂库解密并验证。新版自动生成器对两份原厂备份文件完成了真实设备的加密往返测试。未完成各温度档的真实充电曲线与长期老化验证，因此不应把软件加载测试解释为电芯安全测试。
 
-- 修改、伪造或清零真实循环次数；
-- 修改 BMS 的 SOH、Qmax、FCC 等健康状态；
-- 禁用 `LowSoh-FvDown` 或 `FreqChg-FvDown`；本模块只修改 LowSoh 的触发门槛；
-- 禁用温度、过压、过流、PMIC 或内核最终保护；
-- 永久写入 `/odm`、`/vendor` 或系统分区。
-
-所以它会固定 BasedOnCC 的 index 1，并把 LowSoh 的触发时机推迟到 801+ 次循环且 raw SOH <= 50；它仍不会把旧电池伪装成真正的新电池。
-
-### 当前实机验证
-
-在测试机上：
-
-- 实际循环次数：`101`
-- 模块状态：`ACTIVE`
-- live `/odm/etc/charger/BAA_config_pudding.json` 已通过 systemless bind mount 生效；
-- CN 与 GL 两套 `cyclecount_index_map` 均只有：
-  `idx=1, min=1, max=2147483647`
-- `LowSoh-FvDown` live 条件为 `range_min=801`、`range_max=2147483647`、`threshold=50`；
-- `batteryantiaging` 服务正常运行；
-- `smart_fv=0`、`smart_batt=0`、`smart_chg=0`、`smart_night=0`，检查时没有其它智能降压叠加。
-
-index 1 的原厂主要终止电压仍保持原值，例如 CN 电池：
-
-- FFC：约 `4.570 V`
-- normal（23–35°C）：约 `4.520 V`
-
-因此**就循环次数分档这一项而言，101 次循环时使用的逻辑与新机 1–100 次档一致**。但真实 BMS 状态、温度以及其它保护仍按当前电池实际状态工作。
-
-### 安装
-
-1. 使用 Magisk 安装 Release 中的 ZIP。
-2. 重启。
-3. 在 Magisk 模块页面点击模块操作按钮，可查看当前状态和 live map。
-
-模块安装时会：
-
-- 校验设备为 `pudding`；
-- 校验 ROM 为 `OS3.0.319.0.WPCCNXM`；
-- 校验原厂 `BAA_config_pudding.json` 与 `BAA_config_common.json` 的 SHA-256；
-- 从设备自身配置生成两份 patched 文件；
-- 开机早期使用 bind mount 覆盖 live 路径。
-
-若 ROM/文件 hash 不匹配，模块会 fail closed，不应用旧补丁。
-
-### 卸载/恢复
-
-在 Magisk 中禁用或卸载模块，然后重启即可恢复原厂：
-
-- 1–100 → index 1
-- 101–300 → index 2
-- 301–800 → index 3
-- 801+ → index 4
-
-### 风险说明
-
-固定使用较高的原厂 index 1 充电终止电压，会削弱 Xiaomi 针对高循环次数设计的寿命保护策略，长期使用可能增加高 SOC/高电压下的电池老化速度。请自行承担电池寿命与安全风险。
-
-将 LowSoh 门槛从 200–800 次 / SOH <= 85 推迟到 801+ 次 / SOH <= 50，也会进一步削弱原厂的软件寿命保护。
-
-本模块没有绕过 PMIC/内核级硬件保护，但这不等于“没有风险”。
+HyperOS 3 / Android 16 的旧版用户请使用 [v1.2.0](https://github.com/E3N-glotm/HyperOS-Battery-Cycle-Index-Lock/releases/tag/v1.2.0)，**不要交叉安装**。
 
 ## English
 
-### What it does
+### v1.3.0 — HyperOS 4 / Android 17 only
 
-The stock `BAA_config_pudding.json` selects Xiaomi's `BasedOnCC-VolDown` charging profile by battery cycle count:
+For **Xiaomi pudding**, exact firmware **OS4.0.4.0.XPCCNXM**, Android **API 37**, with exact pinned stock configuration SHA-256 values shown above.
 
-| Cycle count | Stock cyclecount_index |
-|---|---:|
-| 1–100 | 1 |
-| 101–300 | 2 |
-| 301–800 | 3 |
-| 801+ | 4 |
+- Pin `BasedOnCC-VolDown` cycle index to **1** for both CN and GL battery maps.
+- Set the `LowSoh-FvDown` criteria in **both** common and device JSON to **cycle count >= 801 AND raw SOH <= 50**.
+- Preserve all OEM current, voltage, temperature, frequency-charging, and charger-mode protection tables. Never spoof cycle count, BMS SOH or FCC.
+- The ZIP contains **no proprietary OEM config, encryption keys, or device data**. On install, it decrypts and re-encrypts each original `BAA_ENC:` configuration using the device's vendor library and validates the JSON semantic changes and encryption roundtrip.
+- Exact model, ROM, API and OEM input file hash verification; fail closed for unknown versions.
+- Restore by disabling/uninstalling and **rebooting**.
 
-This module changes both CN and GL battery maps to:
+**Risk:** keeping a new-battery profile at elevated cycle counts and deferring low-SOH voltage reductions may accelerate battery aging. No real-world charging voltage/current cycle test has yet been completed.
 
-```json
-[
-  {"idx": 1, "min": 1, "max": 2147483647}
-]
-```
+For HyperOS 3 / Android 16 use the existing [v1.2.0](https://github.com/E3N-glotm/HyperOS-Battery-Cycle-Index-Lock/releases/tag/v1.2.0).
 
-So every real cycle count resolves to `cyclecount_index = 1`, i.e. the OEM charging parameter set normally used for cycles 1–100.
+## Source & licenses
 
-The stock `LowSoh-FvDown` trigger is also changed from cycle count `200–800` with raw SOH `<= 85` to cycle count `801+` with raw SOH `<= 50`. Both conditions must be satisfied.
-
-### What it does not do
-
-It does **not**:
-
-- fake, reset, or modify the real cycle count;
-- overwrite BMS SOH, Qmax, FCC, or health-learning data;
-- disable `LowSoh-FvDown` or `FreqChg-FvDown`; only the LowSoh trigger thresholds are changed;
-- disable thermal, over-voltage, over-current, PMIC, or kernel final protection;
-- permanently modify `/odm`, `/vendor`, or system partitions.
-
-It locks the cycle-count profile selection to index 1 and delays the LowSoh trigger. It does not make an aged battery electrically equivalent to a new battery.
-
-### Verified behavior
-
-On the tested device:
-
-- real cycle count: `101`
-- module state: `ACTIVE`
-- the live ODM config is systemlessly bind-mounted;
-- both CN and GL maps contain only `idx=1, min=1, max=2147483647`;
-- the live LowSoh condition is `range_min=801`, `range_max=2147483647`, `threshold=50`;
-- Xiaomi `batteryantiaging` service remains running;
-- `smart_fv`, `smart_batt`, `smart_chg`, and `smart_night` were all `0` during verification.
-
-For the CN battery, the OEM index-1 termination values remain unchanged, including approximately:
-
-- FFC: `4.570 V`
-- normal charging at 23–35°C: `4.520 V`
-
-Therefore, **for the cycle-count branch specifically, a 101-cycle battery follows the same index-1 profile used by a fresh 1–100-cycle battery**. Other real battery state and protection logic still apply.
-
-### Installation
-
-1. Install the ZIP from Releases in Magisk.
-2. Reboot.
-3. Use the module action button in Magisk to inspect current status and the live cycle map.
-
-The installer checks the exact device, ROM build, and both stock config SHA-256 values before generating the patched configs. Mismatches fail closed.
-
-### Restore stock behavior
-
-Disable or uninstall the module in Magisk and reboot.
-
-### Warning
-
-Keeping the higher OEM index-1 termination voltage after the battery has accumulated more cycles intentionally weakens Xiaomi's cycle-count anti-aging policy. Long-term use may accelerate battery aging under high-SOC/high-voltage conditions.
-
-Delaying LowSoh from 200–800 cycles / SOH <= 85 to 801+ cycles / SOH <= 50 further weakens Xiaomi's software aging protection.
-
-The module retains hardware-level protections, but that does not make the modification risk-free.
-
-## Release
-
-`v1.2.0`
-
-Release ZIP SHA-256:
-
-```text
-02e3474bbb0549d0355fb541576f7c05dc95cb7d7eb248f054665429075385fe
-```
-
-## License
-
-MIT
+- Module source: MIT License, by E3N.
+- Vendor cryptography: dynamically loaded from the end user's firmware, never shipped in the module.
+- JSON implementation: [nlohmann/json](https://github.com/nlohmann/json), MIT License.
+- Magisk ZIP SHA-256 is published in each Release's notes.
