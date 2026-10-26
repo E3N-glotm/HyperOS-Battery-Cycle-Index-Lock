@@ -3,4 +3,4 @@ name=HyperOS Battery Cycle + SOH Index Lock
 version=1.4.0
 versionCode=140
 author=E3N
-description=Capability-probed vendor BAA_ENC crypto + checked OEM schema for pudding; preserves all OEM voltage/current/thermal profiles. No ROM version gate; OTA source changes fail closed until reinstall. CN/GL index1, LowSoh cycles>=801 raw SOH<=50.
+description=小米 pudding 电池循环分档与 SOH 策略模块：检测原厂 BAA 加密接口和配置结构，固定 CN/GL 档位 1，低 SOH 条件为循环≥801且原始 SOH≤50；存在电池老化风险。
