@@ -23,7 +23,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          yes | sdkmanager --install "ndk;27.2.12479018"
+          # sdkmanager can finish successfully and close stdin, causing
+          # yes to exit with SIGPIPE (141) under pipefail. Verify actual NDK.
+          yes | sdkmanager --install "ndk;27.2.12479018" || true
+          test -x "$ANDROID_HOME/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang++"
 
       - name: Fetch licensed JSON header
         shell: bash
