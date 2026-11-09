@@ -7,6 +7,18 @@
 **Behavior:** CN and GL cycle mappings are held at `index=1`; low-SOH FV reduction in both common/device configs requires **cycle count >= 801 AND raw SOH <= 50**. The module preserves other charging/thermal tables, but can weaken battery-aging protection and accelerate wear. No charging-curve safety study has been completed. Historical v1.3.0-specific conditions below are reference only.
 
 
+## v1.5.0-alpha.1: Android vendor BAA linker compatibility after OTA
+
+[Preview release](https://github.com/E3N-glotm/HyperOS-Battery-Cycle-Index-Lock/releases/tag/v1.5.0-alpha.1) (not promoted to stable Latest).
+
+On pudding / OS4.0.5.0.XPCCNXM, both OEM BAA_ENC source fingerprints changed; v1.4.0 correctly deactivated rather than mount its stale encrypted profiles. Re-running the existing native generator in the Android 17 system/default linker namespace fails to load /vendor/lib64/libbaa_common.so. Setting LD_LIBRARY_PATH alone mixes incompatible system/vendor dependencies and is not a safe repair.
+
+v1.5.0-alpha.1 uses an executable-private temporary directory under Android linkerconfig's explicitly declared /data/local/tests/vendor **vendor namespace**, only during install. It runs the **unchanged** native v1.4.0 JSON/crypto validator using the device's real OEM library, then removes the temporary binary. On this phone, decrypt → narrowly selected OEM JSON modifications → encrypt → decrypt/semantic roundtrip passed for both pudding/common BAA_ENC files. No vendor library or OEM ciphertext is redistributed; no SELinux or system partition modifications are made. Unsupported runtime namespace, source format, ABI or policy schema causes a fail-closed installation.
+
+The original policy choices are unchanged: CN/GL battery cycle index 1 and LowSoh-FvDown only when cycles >= 801 AND raw SOH <= 50, preserving other OEM voltage/current/thermal tables and true counters. The unchanged post-fs-data.sh pins freshly verified OEM source hashes and new encrypted target hashes, rolling back partial bind failures after reboot.
+
+**Risk:** This experimental module deliberately delays aging-related charging reductions. It can worsen battery aging and charging safety. Real-phone generation validation passed, but post-reboot OEM service adoption and charging behavior have not yet been proven for this build. Leave as an alpha preview and verify after a normal reboot.
+
 ## Historical behavior (v1.3.0)
 
 For **Xiaomi pudding**, exact firmware **OS4.0.4.0.XPCCNXM**, Android **API 37**, with exact pinned stock configuration SHA-256 values shown above.
