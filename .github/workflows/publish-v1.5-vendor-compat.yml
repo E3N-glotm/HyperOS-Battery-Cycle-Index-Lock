@@ -45,6 +45,7 @@ jobs:
           git rev-parse v1.4.0
           git diff --exit-code v1.4.0 -- \
             src/baa_patch.cpp post-fs-data.sh service.sh uninstall.sh
+          # Safety parser examines executed shell statements, not explanatory comments.
           python3 tests/test_vendor_namespace_v150.py
           for f in customize.sh bin/baa_vendor_namespace.sh post-fs-data.sh service.sh action.sh uninstall.sh; do
             bash -n "$f"
