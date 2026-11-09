@@ -1,0 +1,126 @@
+name: Build verified OEM BAA vendor-linker compatibility v1.5
+on:
+  push:
+    paths:
+      - '.github/workflows/publish-v1.5-vendor-compat.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  verify-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Android SDK and NDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install Android NDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --install "ndk;27.2.12479018"
+
+      - name: Fetch licensed JSON header
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .build/include/nlohmann
+          curl -fsSL --retry 3 \
+            'https://raw.githubusercontent.com/nlohmann/json/v3.12.0/single_include/nlohmann/json.hpp' \
+            -o .build/include/nlohmann/json.hpp
+          test "$(wc -c < .build/include/nlohmann/json.hpp)" -gt 500000
+
+      - name: Original OEM charging policy and boot safety must be unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rev-parse v1.4.0
+          git diff --exit-code v1.4.0 -- \
+            src/baa_patch.cpp post-fs-data.sh service.sh uninstall.sh
+          python3 tests/test_vendor_namespace_v150.py
+          for f in customize.sh bin/baa_vendor_namespace.sh post-fs-data.sh service.sh action.sh uninstall.sh; do
+            bash -n "$f"
+          done
+          grep -Fqx 'version=1.5.0-alpha.1' module.prop
+          ! grep -E 'ro\.build\.version\.(incremental|sdk)' \
+            customize.sh post-fs-data.sh service.sh
+
+      - name: Build original ARM64 crypto and OEM schema validator
+        shell: bash
+        run: |
+          set -euo pipefail
+          CXX="$ANDROID_HOME/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang++"
+          mkdir -p .build/bin
+          "$CXX" -std=c++17 -O2 -Wall -Wextra -Werror -fPIE -pie \
+            -I.build/include src/baa_patch.cpp -ldl -o .build/bin/baa_patch
+          file .build/bin/baa_patch
+          sha256sum .build/bin/baa_patch
+
+      - name: Assemble installable Magisk ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(sed -n 's/^version=//p' module.prop)"
+          test "$VERSION" = "1.5.0-alpha.1"
+          mkdir -p dist/staging/bin
+          cp module.prop customize.sh post-fs-data.sh service.sh action.sh uninstall.sh dist/staging/
+          cp bin/baa_vendor_namespace.sh .build/bin/baa_patch dist/staging/bin/
+          chmod 0755 dist/staging/customize.sh dist/staging/post-fs-data.sh \
+            dist/staging/service.sh dist/staging/action.sh dist/staging/uninstall.sh \
+            dist/staging/bin/baa_vendor_namespace.sh dist/staging/bin/baa_patch
+          ZIP="HyperOS-Battery-Cycle-Index-Lock-v$VERSION.zip"
+          (cd dist/staging && zip -qr -X "../$ZIP" .)
+          unzip -t "dist/$ZIP"
+          if unzip -Z1 "dist/$ZIP" | grep -Ei 'BAA_config|private/|stock.*json|\.enc$'; then
+            echo "Refusing to publish proprietary OEM BAA ciphertext" >&2
+            exit 1
+          fi
+          if unzip -Z1 "dist/$ZIP" | grep -Fqx 'src/baa_patch.cpp'; then
+            echo "Unexpected source file in installable ZIP" >&2
+            exit 1
+          fi
+          unzip -p "dist/$ZIP" module.prop | grep -Fqx "version=$VERSION"
+          unzip -p "dist/$ZIP" bin/baa_vendor_namespace.sh | grep -Fq 'dir.vendor = $BASE'
+          sha256sum "dist/$ZIP" | tee "dist/$ZIP.sha256"
+
+      - name: Upload verified artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: battery-vendor-linker-compat-alpha
+          path: |
+            dist/HyperOS-Battery-Cycle-Index-Lock-v1.5.0-alpha.1.zip
+            dist/HyperOS-Battery-Cycle-Index-Lock-v1.5.0-alpha.1.zip.sha256
+
+      - name: Publish immutable non-latest preview
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG=v1.5.0-alpha.1
+          ZIP="dist/HyperOS-Battery-Cycle-Index-Lock-$TAG.zip"
+          test -s "$ZIP"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Already published: do not overwrite signed release" >&2
+            exit 1
+          fi
+          cat > release-notes.md <<'EOF'
+          ## v1.5.0-alpha.1 — HyperOS 4.0.5 vendor BAA linker compatibility
+
+          pudding / OS4.0.5.0.XPCCNXM 原厂双 BAA_ENC 配置源指纹变化，v1.4.0 安全进入 INACTIVE。重新生成时，Android 17 linker 的 default 命名空间拒绝加载当前真正的 /vendor/lib64/libbaa_common.so。真机确认原有 baa_patch 放入 Android linkerconfig 明确声明的 /data/local/tests/vendor vendor 命名空间，可按当前 OEM BAA_ENC 解密、验证、仅修改指定字段、加密往返校验，pudding/common 两份均通过。
+
+          本版只在安装阶段复制原始验证器到临时且独立的 vendor 链接命名空间执行，随后清理；不复制OEM加密库、不关闭SELinux、不修改/odm和/vendor原厂分区。每次安装固件源指纹仍固定，每次开机核验；不兼容时保留原厂配置，不强制挂载。
+
+          与v1.4.0的策略变更目标一致：CN/GL cyclecount_index=1，LowSoh-FvDown仅在循环次数>=801且原始SOH<=50触发。其他厂商电压、充电电流、温控、真实循环次数和原始SOH必须不变。这个模块有意延后厂商老化保护，可能增加充电风险和电池衰减。
+
+          CI回归确认原始 native 补丁生成器、启动指纹校验、双配置绑定和回滚、后台状态检测均与v1.4字节一致。实机仅确认当前OEM原始配置重新生成成功；尚未完成重启后原厂服务加载/充电曲线长期安全测试，因此保留alpha预览版，不标记Latest。需要Magisk安装并重启后才按开机校验挂载。
+          EOF
+          gh release create "$TAG" "$ZIP" "$ZIP.sha256" \
+            --target "$GITHUB_SHA" \
+            --title "Battery Cycle & SOH Index Lock $TAG (OTA linker fix)" \
+            --notes-file release-notes.md --prerelease --latest=false
