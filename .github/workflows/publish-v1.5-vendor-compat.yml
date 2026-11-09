@@ -1,8 +1,6 @@
 name: Build verified OEM BAA vendor-linker compatibility v1.5
+# Alpha 1 has been published and verified. Do not accidentally replace it.
 on:
-  push:
-    paths:
-      - '.github/workflows/publish-v1.5-vendor-compat.yml'
   workflow_dispatch:
 
 permissions:
