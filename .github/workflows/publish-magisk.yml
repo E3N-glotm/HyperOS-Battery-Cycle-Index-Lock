@@ -1,8 +1,7 @@
 name: Build and publish capability-detected battery module
 on:
-  push:
-    branches: [main]
-    paths: ['module.prop', 'customize.sh', 'post-fs-data.sh', 'service.sh', 'src/baa_patch.cpp', '.github/workflows/publish-magisk.yml']
+  # v1.4.0 release is frozen; newer firmware-specific builds have their
+  # own verified workflow and immutable tag. Avoid any legacy auto-publish.
   workflow_dispatch:
 permissions:
   contents: write
