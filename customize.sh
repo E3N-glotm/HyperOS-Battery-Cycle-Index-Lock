@@ -1,7 +1,7 @@
 #!/system/bin/sh
 # Capability-driven HyperOS BAA_ENC installer. Physical battery profile stays
 # pudding-specific; ROM build numbers and OEM ciphertext hashes are NOT gates.
-ui_print "- Battery Cycle + SOH Index Lock v1.4.0 (capability detection)"
+ui_print "- Battery Cycle + SOH Index Lock v1.5.0-alpha.1 (OTA vendor linker compatibility)"
 P=/odm/etc/charger/BAA_config_pudding.json
 C=/odm/etc/charger/BAA_config_common.json
 OLD=/data/adb/modules/battery_cycle_aging_switch_off
@@ -37,7 +37,7 @@ if [ -r "$OLD/module.prop" ] && [ -r "$OP" ] && [ -r "$OC" ] &&
         abort "! Unknown v1.3.0 hotfix provenance"
       SOURCE_P=a03abd594154588667684b8c09ceccbd51e5d9875fc827e0eee08d8d4c1ecad5
       SOURCE_C=83aac16d8bed63170c856b41b1d280e1720a2738131b5de326ae40dbcffdfd44 ;;
-    1.4.*)
+    1.4.*|1.5.*)
       [ -r "$OLD/private/verified.sha256" ] || abort "! Missing previous validation metadata"
       SOURCE_P="$(sed -n 's/^P_SOURCE=//p' "$OLD/private/verified.sha256")"
       SOURCE_C="$(sed -n 's/^C_SOURCE=//p' "$OLD/private/verified.sha256")"
@@ -49,7 +49,8 @@ if [ -r "$OLD/module.prop" ] && [ -r "$OP" ] && [ -r "$OC" ] &&
 else
   # Works with another HyperOS version ONLY when real vendor crypto and the
   # tested JSON safety schema both match; no incremental / SDK hard-coding.
-  "$MODPATH/bin/baa_patch" "$P" "$C" "$PP" "$CP" ||
+  /system/bin/sh "$MODPATH/bin/baa_vendor_namespace.sh" \
+    "$MODPATH/bin/baa_patch" "$P" "$C" "$PP" "$CP" ||
     abort "! BAA crypto or OEM JSON policy schema incompatible; stock retained"
   ui_print "- OEM capability and bounded JSON schema validated"
 fi
@@ -68,6 +69,7 @@ set_perm "$MODPATH/service.sh" 0 0 0755
 set_perm "$MODPATH/action.sh" 0 0 0755
 set_perm "$MODPATH/uninstall.sh" 0 0 0755
 set_perm "$MODPATH/bin/baa_patch" 0 0 0755
+set_perm "$MODPATH/bin/baa_vendor_namespace.sh" 0 0 0755
 set_perm "$PP" 0 0 0644
 set_perm "$CP" 0 0 0644
 set_perm "$META" 0 0 0600
