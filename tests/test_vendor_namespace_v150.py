@@ -8,6 +8,7 @@ from pathlib import Path
 
 root=Path(__file__).resolve().parents[1]
 runner=(root/"bin/baa_vendor_namespace.sh").read_text()
+runner_commands="\n".join(line for line in runner.splitlines() if not line.lstrip().startswith("#"))
 installer=(root/"customize.sh").read_text()
 patch=(root/"src/baa_patch.cpp").read_text()
 boot=(root/"post-fs-data.sh").read_text()
@@ -31,7 +32,7 @@ checks={
         and "trap 'cleanup' EXIT" in runner,
     "no proprietary vendor libraries/files are copied to executable directory":
         'cp "$HELPER" "$STAGING/baa_patch"' in runner
-        and not any(x in runner for x in (
+        and not any(x in runner_commands for x in (
             'cp /vendor/lib', 'cp "$SRC_P"', 'cp "$SRC_C"',
             'mount --bind', 'setenforce', 'magiskpolicy', 'chcon',
             'LD_LIBRARY_PATH=/vendor/lib64')),
