@@ -35,13 +35,19 @@ jobs:
             src/baa_patch.cpp bin/baa_vendor_namespace.sh uninstall.sh
           git rev-parse v1.4.0
           git diff --exit-code v1.4.0 -- src/baa_patch.cpp
-          # Capability gating must remain, and no ROM build-number or SDK gate
-          # may be introduced anywhere.
-          ! grep -E 'ro\.build\.version\.(incremental|sdk)' \
-            customize.sh post-fs-data.sh service.sh action.sh bin/compat_probe.sh
+          # Capability gating must remain. The installer may never look at a ROM
+          # build number or SDK number at all.
+          ! grep -E 'ro\.build\.version\.(incremental|sdk)' customize.sh
           grep -Fq 'ro.product.device' customize.sh
           grep -Fq 'baa_vendor_namespace.sh' customize.sh
           grep -Fq 'bin/compat_probe.sh' customize.sh
+          # Runtime scripts may RECORD the firmware build for provenance, but a
+          # build or SDK value must never be compared or branched on, so an
+          # unknown HyperOS build can never be silently whitelisted or blocked.
+          ! grep -nE '\[\s*[!"$]*"?\$\(getprop ro\.build\.version\.(incremental|sdk)' \
+            post-fs-data.sh service.sh action.sh bin/compat_probe.sh
+          ! grep -nE 'case\s+"?\$\(getprop ro\.build\.version\.(incremental|sdk)' \
+            post-fs-data.sh service.sh action.sh bin/compat_probe.sh
           grep -Fqx 'version=1.5.0-alpha.2' module.prop
           grep -Fqx 'versionCode=1502' module.prop
           grep -Fqx 'id=battery_cycle_aging_switch_off' module.prop

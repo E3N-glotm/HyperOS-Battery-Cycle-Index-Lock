@@ -4,10 +4,24 @@
 
 针对已验证的 Xiaomi `pudding` 电池硬件的 Magisk 模块。通过设备自己的原厂 BAA 加密库，有限修改电池循环次数对应的充电老化策略，不直接修改系统分区。
 
-**当前版本：v1.5.0-alpha.1（固件适配预览版）** · [下载 Release](https://github.com/E3N-glotm/HyperOS-Battery-Cycle-Index-Lock/releases)
+**当前版本：v1.5.0-alpha.2（状态诊断/兼容性预览版，不作为稳定 Latest）** · [下载 Release](https://github.com/E3N-glotm/HyperOS-Battery-Cycle-Index-Lock/releases)
 
 > [!WARNING]
 > 固定“新电池”循环分档并推迟低 SOH 降压策略，会弱化厂家针对电芯老化设计的保护，**可能加速电池衰减**。它不会提升真实电池容量，也不能替代真实充电电压、电流、温度与电芯寿命测试。
+
+## v1.5.0-alpha.2：OTA 后的状态分类与只读兼容性诊断
+
+**[Release](https://github.com/E3N-glotm/HyperOS-Battery-Cycle-Index-Lock/releases/tag/v1.5.0-alpha.2)**（预览版，不标记 Latest）。
+
+实机 `pudding / OS4.0.6.0.XPCCNXM`（Android 17）OTA 后，两份原厂 BAA_ENC 输入指纹都相对安装时发生变化，v1.5.0-alpha.1 按设计安全停用，但只报出一句笼统的 `INACTIVE`，无法区分具体原因。本版**只改可观测性，不改挂载决策**：
+
+- `status.txt` 现在带原因码；新增 `diagnostics.txt` 记录状态、原因、pinned 与实机指纹、挂载状态、原厂 BAA 服务状态，以及明确列出“尚未验证”的项目。
+- 原因码区分原厂配置变化、原厂文件缺失、完整性校验失败、能力缺失、元数据缺失或损坏、格式不支持、私有生成物被改动、SELinux 接口失败、挂载失败已回滚等。
+- 新增纯只读探针 `bin/compat_probe.sh`，OTA 前后各运行一次即可对比；不 mount、不 umount、不 remount、不改标签、不动 SELinux、不改属性、不写 `/odm`、`/vendor`、`/sys`。
+- 状态不再从“模块已启用”推断：只有 PID1 挂载命名空间里两份密文指纹全部对上才算生效；指纹对上但原厂服务未运行时标记 `STAGED`（效果未验证）。
+- OTA 后旧 profile 过期时**不强制挂载**，运行中固件的原厂充电策略保持生效，并在报告里说明这是安全回退而不是“充电策略已恢复”。
+
+CI 逐字节冻结 `src/baa_patch.cpp`、`bin/baa_vendor_namespace.sh`、`uninstall.sh` 与 v1.5.0-alpha.1 一致，native 生成器与 v1.4.0 一致；安装与开机逻辑仍不使用固件 build 号或 SDK 号作为闸门（固件 build 号仅作为审计字段记录，绝不参与判定）。
 
 ## v1.5.0-alpha.1：HyperOS 4.0.5 原厂 BAA 加密库兼容修复
 

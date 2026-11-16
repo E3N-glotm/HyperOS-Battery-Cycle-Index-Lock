@@ -76,12 +76,29 @@ checks = {
         "unverified=" in boot and "long_term_charging_safety" in boot
         and "unverified=" in service,
     "no firmware build-number or SDK gate was introduced":
-        not any(
-            marker in executed(boot + service + action + probe)
-            for marker in (
-                "ro.build.version.incremental=",
-                "ro.build.version.sdk=",
+        # Recording the firmware build for provenance is required; deciding on it
+        # is forbidden. A build/SDK value may only ever be printed or assigned to
+        # a provenance variable, never tested, branched on or pattern-matched.
+        "ro.product.device" in executed(boot)
+        and not any(
+            token in executed(boot + service + action + probe)
+            for token in (
+                '[ "$(getprop ro.build.version',
+                '[ ! "$(getprop ro.build.version',
+                'case "$(getprop ro.build.version',
+                'grep -q "$BUILD"',
+                'grep -q "$SDK"',
+                '[ "$BUILD"',
+                '[ "$SDK"',
+                'expr "$BUILD"',
             )
+        )
+        and all(
+            ("oem_build" in line) or ("android_sdk" in line) or ("ROM:" in line)
+            or line.startswith("BUILD=") or line.startswith("SDK=")
+            for line in (boot + service + action + probe).splitlines()
+            if "ro.build.version.incremental" in line
+            or "ro.build.version.sdk" in line
         ),
     "the probe performs no mount, label, policy or property change":
         not any(
