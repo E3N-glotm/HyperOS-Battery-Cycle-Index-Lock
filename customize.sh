@@ -1,7 +1,7 @@
 #!/system/bin/sh
 # Capability-driven HyperOS BAA_ENC installer. Physical battery profile stays
 # pudding-specific; ROM build numbers and OEM ciphertext hashes are NOT gates.
-ui_print "- Battery Cycle + SOH Index Lock v1.5.0-alpha.1 (OTA vendor linker compatibility)"
+ui_print "- Battery Cycle + SOH Index Lock v1.5.0-alpha.2 (OTA status diagnostics)"
 P=/odm/etc/charger/BAA_config_pudding.json
 C=/odm/etc/charger/BAA_config_common.json
 OLD=/data/adb/modules/battery_cycle_aging_switch_off
@@ -70,6 +70,7 @@ set_perm "$MODPATH/action.sh" 0 0 0755
 set_perm "$MODPATH/uninstall.sh" 0 0 0755
 set_perm "$MODPATH/bin/baa_patch" 0 0 0755
 set_perm "$MODPATH/bin/baa_vendor_namespace.sh" 0 0 0755
+set_perm "$MODPATH/bin/compat_probe.sh" 0 0 0755
 set_perm "$PP" 0 0 0644
 set_perm "$CP" 0 0 0644
 set_perm "$META" 0 0 0600
@@ -77,3 +78,6 @@ chcon u:object_r:batteryantiaging_cfg_file:s0 "$PP" "$CP" ||
   abort "! OEM BAA SELinux interface incompatible"
 ui_print "- Preserved all other OEM charge voltage/current/thermal tables"
 ui_print "- No OS-version or fixed OEM ciphertext hash gate; reboot required"
+ui_print "- After reboot, Module Action reports the reason for any INACTIVE state"
+ui_print "- sh /data/adb/modules/battery_cycle_aging_switch_off/bin/compat_probe.sh"
+ui_print "  is read-only and can be run before and after a future OTA"

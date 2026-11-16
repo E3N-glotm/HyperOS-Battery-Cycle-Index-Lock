@@ -1,13 +1,19 @@
 #!/system/bin/sh
-# v1.5: report real battery data and current-vs-pinned OEM BAA fingerprints.
-# Purely read-only. Does not change charging policy or mount state.
+# v1.5.0-alpha.2: read-only diagnostics with an explicit reason code, so an
+# inactive module is never mistaken for a working one and a safe fallback is
+# never mistaken for a restored charging policy.
+# Purely read-only: no mount, no unmount, no property change, no label change.
 MODDIR=${0%/*}
 META="$MODDIR/private/verified.sha256"
 P=/odm/etc/charger/BAA_config_pudding.json
 C=/odm/etc/charger/BAA_config_common.json
 
-echo "=== HyperOS Battery Cycle + SOH Index Lock v1.5.0-alpha.1 ==="
-cat "$MODDIR/status.txt" 2>/dev/null || echo "State: no completed boot audit"
+echo "=== HyperOS Battery Cycle + SOH Index Lock v1.5.0-alpha.2 ==="
+cat "$MODDIR/status.txt" 2>/dev/null ||
+  echo "State: no completed boot audit for this install"
+echo "--- Last recorded boot audit ---"
+cat "$MODDIR/diagnostics.txt" 2>/dev/null ||
+  echo "No diagnostics record yet (installed by an older version: reboot or reinstall)"
 echo "ROM: $(getprop ro.build.version.incremental)"
 printf "Device: "
 getprop ro.product.device
@@ -30,10 +36,19 @@ if [ -r "$META" ]; then
 else
   echo "Not generated/validated"
 fi
+echo "=== Read-only compatibility probe ==="
+if [ -f "$MODDIR/bin/compat_probe.sh" ]; then
+  /system/bin/sh "$MODDIR/bin/compat_probe.sh"
+else
+  echo "compat probe missing; reinstall to restore it"
+fi
 echo "=== OEM Battery Antiaging Service PID ==="
 pidof vendor.xiaomi.hardware.batteryantiaging-service || true
-echo "=== Safety notice ==="
-echo "Only validated BAA profiles may mount after reboot."
-echo "This module suppresses OEM battery aging charging reductions."
-echo "Long-term charging safety and cell life may be affected."
-echo "Disable the module and reboot to restore OEM charging policy."
+echo "=== Claims boundary ==="
+echo "Only a fingerprint-validated BAA pair may mount, and only after reboot."
+echo "After a firmware update the previous install profile is expired: nothing"
+echo "is force-mounted and the running firmware's stock OEM charging policy"
+echo "remains in effect. Reinstall on the current firmware to revalidate, or"
+echo "disable the module. Status is never inferred from the module being enabled."
+echo "When mounted, this module intentionally defers OEM battery aging charging"
+echo "reductions; long-term charging safety and cell life may be affected."

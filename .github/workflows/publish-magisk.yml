@@ -1,7 +1,8 @@
-name: Build and publish capability-detected battery module
+name: Legacy v1.4.0 packaging (frozen)
+# Reproduces only the frozen v1.4.0 artifact. It never runs on a tag push, so
+# it cannot republish anything. Newer releases use their own verified workflow:
+# publish-v1.5-vendor-compat.yml and publish-v1.5.0-alpha.2.yml.
 on:
-  # v1.4.0 release is frozen; newer firmware-specific builds have their
-  # own verified workflow and immutable tag. Avoid any legacy auto-publish.
   workflow_dispatch:
 permissions:
   contents: write
@@ -10,6 +11,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Reproduce the frozen release tree, not the diagnostics HEAD.
+          ref: v1.4.0
       - uses: android-actions/setup-android@v4
         with:
           packages: 'platform-tools'

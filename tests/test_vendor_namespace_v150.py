@@ -7,17 +7,19 @@ because publishing proprietary OEM encrypted data or vendor libraries is forbidd
 from pathlib import Path
 
 root=Path(__file__).resolve().parents[1]
-runner=(root/"bin/baa_vendor_namespace.sh").read_text()
+runner=(root/"bin/baa_vendor_namespace.sh").read_text(encoding="utf-8")
 runner_commands="\n".join(line for line in runner.splitlines() if not line.lstrip().startswith("#"))
-installer=(root/"customize.sh").read_text()
-patch=(root/"src/baa_patch.cpp").read_text()
-boot=(root/"post-fs-data.sh").read_text()
-service=(root/"service.sh").read_text()
-prop=(root/"module.prop").read_text()
+installer=(root/"customize.sh").read_text(encoding="utf-8")
+patch=(root/"src/baa_patch.cpp").read_text(encoding="utf-8")
+boot=(root/"post-fs-data.sh").read_text(encoding="utf-8")
+service=(root/"service.sh").read_text(encoding="utf-8")
+prop=(root/"module.prop").read_text(encoding="utf-8")
 checks={
     "new module version and immutable ID":
-        "version=1.5.0-alpha.1" in prop
-        and "versionCode=1501" in prop
+        # 1.5.0-alpha.2 changed only status/diagnostics reporting; the mounting
+        # decision, installer validation and native generator stay identical.
+        "version=1.5.0-alpha.2" in prop
+        and "versionCode=1502" in prop
         and "id=battery_cycle_aging_switch_off" in prop,
     "only vendor namespace declared by Android linker configuration":
         'CONF=/linkerconfig/ld.config.txt' in runner
@@ -55,7 +57,7 @@ checks={
         and '"$LIVE_C" = "$C_SOURCE"' in boot
         and '"$LIVE_P" = "$P_NEW"' in boot
         and '"$LIVE_C" = "$C_NEW"' in boot
-        and 'fail "OEM BAA input fingerprint changed' in boot,
+        and 'fail REASON_OEM_SOURCE_CHANGED' in boot,
     "only bounded policy targets remain 1 and >=801, SOH<=50":
         'row=json::array({{{"idx",1},{"min",1},{"max",2147483647}}});' in patch
         and 'cycle["range_min"]=801;' in patch
@@ -69,7 +71,9 @@ checks={
         and 'ns /system/bin/umount "$P"' in boot
         and 'ns /system/bin/umount "$C"' in boot,
     "service rejects mismatched mount and remains fail-closed":
-        'source version/profile changed or mount integrity verification failed' in service,
+        'REASON_INTEGRITY_MISMATCH' in service
+        and 'state INACTIVE' in service
+        and 'mount integrity verification failed' in service,
 }
 for label, ok in checks.items():
     if not ok:

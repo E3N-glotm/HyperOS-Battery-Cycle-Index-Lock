@@ -1,0 +1,164 @@
+name: Publish OTA diagnostics alpha 2
+# v1.5.0-alpha.1 is frozen and its release artifact is immutable. This workflow
+# publishes only the diagnostics/classification follow-up and refuses to
+# overwrite an existing tag or release.
+on:
+  push:
+    tags:
+      - v1.5.0-alpha.2
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  TAG: v1.5.0-alpha.2
+  ZIP_NAME: HyperOS-Battery-Cycle-Index-Lock-v1.5.0-alpha.2.zip
+
+jobs:
+  verify-and-release:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Freeze the OEM crypto generator and the installer namespace path
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rev-parse v1.5.0-alpha.1
+          # Nothing that touches OEM ciphertext, the vendor linker namespace or
+          # the uninstall path may change in a diagnostics-only release.
+          git diff --exit-code v1.5.0-alpha.1 -- \
+            src/baa_patch.cpp bin/baa_vendor_namespace.sh uninstall.sh
+          git rev-parse v1.4.0
+          git diff --exit-code v1.4.0 -- src/baa_patch.cpp
+          # Capability gating must remain, and no ROM build-number or SDK gate
+          # may be introduced anywhere.
+          ! grep -E 'ro\.build\.version\.(incremental|sdk)' \
+            customize.sh post-fs-data.sh service.sh action.sh bin/compat_probe.sh
+          grep -Fq 'ro.product.device' customize.sh
+          grep -Fq 'baa_vendor_namespace.sh' customize.sh
+          grep -Fq 'bin/compat_probe.sh' customize.sh
+          grep -Fqx 'version=1.5.0-alpha.2' module.prop
+          grep -Fqx 'versionCode=1502' module.prop
+          grep -Fqx 'id=battery_cycle_aging_switch_off' module.prop
+
+      - name: Static safety and diagnostics contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tests/test_vendor_namespace_v150.py
+          python3 tests/test_status_diagnostics_v1502.py
+          for f in customize.sh bin/baa_vendor_namespace.sh bin/compat_probe.sh \
+                   post-fs-data.sh service.sh action.sh uninstall.sh; do
+            bash -n "$f"
+          done
+
+      - name: Set up Android SDK and NDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install Android NDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          # sdkmanager can finish successfully and close stdin, causing yes to
+          # exit with SIGPIPE (141) under pipefail. Verify the actual NDK.
+          yes | sdkmanager --install "ndk;27.2.12479018" || true
+          test -x "$ANDROID_HOME/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang++"
+
+      - name: Fetch licensed JSON header
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .build/include/nlohmann
+          curl -fsSL --retry 3 \
+            'https://raw.githubusercontent.com/nlohmann/json/v3.12.0/single_include/nlohmann/json.hpp' \
+            -o .build/include/nlohmann/json.hpp
+          test "$(wc -c < .build/include/nlohmann/json.hpp)" -gt 500000
+
+      - name: Rebuild the unchanged OEM crypto and schema validator
+        shell: bash
+        run: |
+          set -euo pipefail
+          CXX="$ANDROID_HOME/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android35-clang++"
+          mkdir -p .build/bin
+          "$CXX" -std=c++17 -O2 -Wall -Wextra -Werror -fPIE -pie \
+            -I.build/include src/baa_patch.cpp -ldl -o .build/bin/baa_patch
+          file .build/bin/baa_patch
+          sha256sum .build/bin/baa_patch
+
+      - name: Assemble the installable Magisk ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(sed -n 's/^version=//p' module.prop)" = "1.5.0-alpha.2"
+          mkdir -p dist/staging/bin
+          cp module.prop customize.sh post-fs-data.sh service.sh action.sh uninstall.sh dist/staging/
+          cp bin/baa_vendor_namespace.sh bin/compat_probe.sh .build/bin/baa_patch dist/staging/bin/
+          chmod 0755 dist/staging/customize.sh dist/staging/post-fs-data.sh \
+            dist/staging/service.sh dist/staging/action.sh dist/staging/uninstall.sh \
+            dist/staging/bin/baa_vendor_namespace.sh dist/staging/bin/compat_probe.sh \
+            dist/staging/bin/baa_patch
+          (cd dist/staging && zip -qr -X "../$ZIP_NAME" .)
+          unzip -t "dist/$ZIP_NAME"
+          if unzip -Z1 "dist/$ZIP_NAME" | grep -Ei 'BAA_config|private/|stock.*json|\.enc$'; then
+            echo "Refusing to publish proprietary OEM BAA ciphertext" >&2
+            exit 1
+          fi
+          if unzip -Z1 "dist/$ZIP_NAME" | grep -Fqx 'src/baa_patch.cpp'; then
+            echo "Unexpected source file in the installable ZIP" >&2
+            exit 1
+          fi
+          unzip -p "dist/$ZIP_NAME" module.prop | grep -Fqx 'version=1.5.0-alpha.2'
+          unzip -p "dist/$ZIP_NAME" bin/baa_vendor_namespace.sh | grep -Fq 'dir.vendor = $BASE'
+          unzip -p "dist/$ZIP_NAME" bin/compat_probe.sh | grep -Fq 'probe_write_policy=none'
+          unzip -p "dist/$ZIP_NAME" service.sh | grep -Fq 'REASON_OEM_SOURCE_CHANGED'
+          unzip -p "dist/$ZIP_NAME" action.sh | grep -Fq 'compat_probe.sh'
+          sha256sum "dist/$ZIP_NAME" | tee "dist/$ZIP_NAME.sha256"
+
+      - name: Upload verified artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: battery-ota-diagnostics-alpha2
+          path: |
+            dist/${{ env.ZIP_NAME }}
+            dist/${{ env.ZIP_NAME }}.sha256
+
+      - name: Publish the new prerelease
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ZIP="dist/$ZIP_NAME"
+          test -s "$ZIP"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Already published: never overwrite a signed release" >&2
+            exit 1
+          fi
+          cat > release-notes.md <<'EOF'
+          ## v1.5.0-alpha.2 — OTA 后的状态分类与只读兼容性诊断
+
+          实机 `pudding / OS4.0.6.0.XPCCNXM`（Android 17）OTA 后，两份原厂 `BAA_ENC` 输入指纹均相对安装时发生变化，v1.5.0-alpha.1 按设计安全停用；但旧版只报出一句笼统的 `INACTIVE: source version/profile changed or mount integrity verification failed`，用户无法区分“原厂配置变化”“原厂文件缺失”“完整性校验失败”“能力缺失”“挂载失败已回滚”。
+
+          本版只修复可观测性与状态分类，**不改变充电策略决策**：
+
+          - `status.txt` 与新增 `diagnostics.txt` 现在分别给出状态、原因码、pinned 与实机指纹、挂载状态、原厂 BAA 服务状态，以及明确列出尚未验证的项目。
+          - 原因码区分 `REASON_OEM_SOURCE_CHANGED`、`REASON_OEM_INPUT_MISSING`、`REASON_INTEGRITY_MISMATCH`、`REASON_ABILITY_UNAVAILABLE`、`REASON_NO_VALIDATED_METADATA`、`REASON_METADATA_MALFORMED`、`REASON_UNSUPPORTED_FORMAT`、`REASON_OVERLAY_MUTATED`、`REASON_SELINUX_INTERFACE_FAILURE`、`REASON_PERMISSION_FAILURE`、`REASON_MOUNT_FAILURE`、`REASON_DEVICE_PROFILE_CHANGED`。
+          - 新增 `bin/compat_probe.sh`：纯只读 OTA 兼容性探针，OTA 前后各跑一次即可对比；不 mount、不 umount、不 remount、不改标签、不动 SELinux、不改属性、不写 `/odm`、`/vendor`、`/sys`。
+          - `action.sh` 输出兼容性判定与开机审计记录，并明确声明：OTA 后旧 profile 过期时不强制挂载，运行中固件的原厂充电策略保持生效。
+          - 状态不再从“模块已启用”推断：只有 PID1 挂载命名空间里两份密文指纹都对上，才报告生效；指纹对上但原厂服务未运行时报告 `STAGED`（效果未验证）。
+
+          冻结项（CI 逐字节比对）：`src/baa_patch.cpp`、`bin/baa_vendor_namespace.sh`、`uninstall.sh` 与 v1.5.0-alpha.1 完全一致，native 生成器与 v1.4.0 完全一致。策略目标仍是 CN/GL `cyclecount_index=1`、`LowSoh-FvDown` 仅在循环次数 >= 801 且原始 SOH <= 50 时触发；其他厂商电压、充电电流、温控表、真实循环次数与原始 SOH 不变。安装与开机逻辑仍不使用固件 build 号或 SDK 号作为闸门。
+
+          本版本**不宣称充电策略已恢复**。当前实机状态是原厂配置安全回退（stock retained）。若要在当前固件上重新生效，需在 OTA 后的系统中重装本模块重新采样并逐项验证，再重启由开机校验决定是否挂载；卸载只需禁用/删除模块并重启，绑定挂载随之消失，不遗留 OEM 分区写入。挂载成功后模块仍有意延后原厂老化保护，长期充电安全与电池寿命仍需厂商级硬件验证。
+
+          需要 Magisk 安装并重启。本包的实机重启后原厂服务加载与长期充电曲线验收仍未完成，因此保持 alpha 预览、不标记 Latest。
+          EOF
+          gh release create "$TAG" "$ZIP" "$ZIP.sha256" \
+            --target "$GITHUB_SHA" \
+            --title "Battery Cycle & SOH Index Lock $TAG (OTA status diagnostics)" \
+            --notes-file release-notes.md --prerelease --latest=false

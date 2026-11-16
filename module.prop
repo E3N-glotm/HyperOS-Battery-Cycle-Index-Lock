@@ -1,6 +1,6 @@
 id=battery_cycle_aging_switch_off
 name=HyperOS Battery Cycle + SOH Index Lock
-version=1.5.0-alpha.1
-versionCode=1501
+version=1.5.0-alpha.2
+versionCode=1502
 author=E3N
-description=实验版：修复OTA后pudding原厂BAA加密库Android vendor linker命名空间加载；重新按当前OEM原始配置生成和逐项验证，保留CN/GL循环分档1、LowSoh循环>=801且原始SOH<=50，源指纹变化仍安全停用。长期充电老化风险未消除。
+description=实验版：OTA后原厂BAA源指纹变化时明确报告停用原因并保留新版原厂充电策略（只读兼容性探针+开机审计，绝不强制挂载已过期配置）；沿用v1.5的vendor linker命名空间重新验证机制，保留CN/GL循环分档1、LowSoh循环>=801且原始SOH<=50。挂载成功即有意延后原厂老化保护，长期充电老化风险未消除。
