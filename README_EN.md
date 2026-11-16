@@ -2,10 +2,25 @@
 
 **Language: [简体中文](README.md) | English (current)**
 
-**Current version: v1.4.0 — feature-based installation.** The module no longer gates on an exact ROM build, SDK number or a hardcoded source ciphertext hash. Instead it verifies Xiaomi `pudding` battery hardware, the `BAA_ENC:` vendor crypto API, BMS cycle/SOH nodes and the complete relevant OEM JSON schema. The original OEM configuration fingerprint is recorded during install. After an OTA changes that source, the previous overlay is not mounted, and the module must be reinstalled to regenerate it. Do not use on other battery hardware even if paths appear similar.
+**Current version: v1.5.0-alpha.2 — feature-based installation, classified OTA diagnostics.** The module never gates on an exact ROM build, SDK number or a hardcoded source ciphertext hash. Instead it verifies Xiaomi `pudding` battery hardware, the `BAA_ENC:` vendor crypto API, BMS cycle/SOH nodes and the complete relevant OEM JSON schema. The original OEM configuration fingerprint is recorded during install. After an OTA changes that source, the previous overlay is not mounted, and the module must be reinstalled to regenerate it. Do not use on other battery hardware even if paths appear similar.
 
 **Behavior:** CN and GL cycle mappings are held at `index=1`; low-SOH FV reduction in both common/device configs requires **cycle count >= 801 AND raw SOH <= 50**. The module preserves other charging/thermal tables, but can weaken battery-aging protection and accelerate wear. No charging-curve safety study has been completed. Historical v1.3.0-specific conditions below are reference only.
 
+## v1.5.0-alpha.2: classified status and a read-only OTA compatibility probe
+
+[Release](https://github.com/E3N-glotm/HyperOS-Battery-Cycle-Index-Lock/releases/tag/v1.5.0-alpha.2) (preview, not marked Latest).
+
+On `pudding / OS4.0.6.0.XPCCNXM` (Android 17) both OEM `BAA_ENC` input fingerprints changed after the OTA, so v1.5.0-alpha.1 correctly deactivated — but it reported only one generic `INACTIVE` sentence, leaving the user unable to tell a firmware source change from a missing file, an integrity mismatch, a missing capability or a rolled-back mount.
+
+This release changes observability only; the mounting decision is unchanged:
+
+- `status.txt` now carries a reason code, and a new `diagnostics.txt` records state, reason, pinned versus live fingerprints, mount state, OEM BAA service state, and an explicit list of what is still unverified.
+- Reason codes separate `REASON_OEM_SOURCE_CHANGED`, `REASON_OEM_INPUT_MISSING`, `REASON_INTEGRITY_MISMATCH`, `REASON_ABILITY_UNAVAILABLE`, `REASON_NO_VALIDATED_METADATA`, `REASON_METADATA_MALFORMED`, `REASON_UNSUPPORTED_FORMAT`, `REASON_OVERLAY_MUTATED`, `REASON_SELINUX_INTERFACE_FAILURE`, `REASON_PERMISSION_FAILURE`, `REASON_MOUNT_FAILURE` and `REASON_DEVICE_PROFILE_CHANGED`.
+- New `bin/compat_probe.sh`: a strictly read-only OTA compatibility probe to run before and after an update. No mount, no unmount, no remount, no relabelling, no SELinux change, no property change, and no write to `/odm`, `/vendor` or `/sys`.
+- Status is never inferred from the module being enabled: only matching ciphertext fingerprints inside the PID1 mount namespace count as active, and matching fingerprints without a running OEM service are reported as `STAGED` (effect unverified).
+- An expired profile is never force-mounted; the running firmware's stock OEM charging policy stays in effect and the report says so explicitly instead of claiming a restored policy.
+
+CI byte-compares `src/baa_patch.cpp`, `bin/baa_vendor_namespace.sh` and `uninstall.sh` against v1.5.0-alpha.1, and the native generator against v1.4.0. Firmware build and SDK numbers are recorded for provenance only and never used as a decision gate.
 
 ## v1.5.0-alpha.1: Android vendor BAA linker compatibility after OTA
 
